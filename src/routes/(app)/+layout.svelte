@@ -5,15 +5,23 @@
 	import { app } from '$lib/stores/app.svelte';
 	import { engine } from '$lib/detection/engine.svelte';
 	import { runtime } from '$lib/triggers/runtime.svelte';
+	import { soundPlayer } from '$lib/audio/player.svelte';
 
 	let { children } = $props();
 
 	const bridge = getBridge();
 
-	// One-shot load of persisted settings + wire the matcher to detection frames.
+	// One-shot load of persisted settings + wire the matcher to detection frames
+	// and fired triggers to sound playback.
 	onMount(() => {
-		void app.load();
 		runtime.init();
+		runtime.onFire = (trigger) => {
+			if (trigger.soundId) void soundPlayer.play(trigger.soundId);
+		};
+		void (async () => {
+			await app.load();
+			soundPlayer.preloadAll();
+		})();
 	});
 
 	type NavItem = { href: string; label: string; icon: 'dashboard' | 'trigger' | 'sound' | 'settings' };

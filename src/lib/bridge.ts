@@ -16,6 +16,11 @@ export interface FaceboardApi {
 		get(): Promise<unknown | null>;
 		set(doc: unknown): Promise<void>;
 	};
+	sounds: {
+		openDialog(): Promise<{ path: string; name: string }[]>;
+		read(filePath: string): Promise<ArrayBuffer>;
+		exists(filePath: string): Promise<boolean>;
+	};
 }
 
 export function getBridge(): FaceboardApi | null {

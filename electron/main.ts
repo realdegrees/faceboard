@@ -3,6 +3,10 @@ import path from 'node:path';
 import serve from 'electron-serve';
 import { registerIpc } from './ipc';
 
+// Triggers fire from the camera, not a click — allow sound playback without a
+// prior user gesture.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
 const isDev = process.env.NODE_ENV === 'development';
 
 // In production the SvelteKit static build is served from a custom app:// scheme.

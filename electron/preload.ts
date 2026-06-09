@@ -15,6 +15,12 @@ const api = {
 	settings: {
 		get: (): Promise<unknown | null> => ipcRenderer.invoke('settings:get'),
 		set: (doc: unknown): Promise<void> => ipcRenderer.invoke('settings:set', doc)
+	},
+	sounds: {
+		openDialog: (): Promise<{ path: string; name: string }[]> =>
+			ipcRenderer.invoke('dialog:open-sounds'),
+		read: (filePath: string): Promise<ArrayBuffer> => ipcRenderer.invoke('sound:read', filePath),
+		exists: (filePath: string): Promise<boolean> => ipcRenderer.invoke('sound:exists', filePath)
 	}
 };
 
