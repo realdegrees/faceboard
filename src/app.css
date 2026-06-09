@@ -1,0 +1,62 @@
+@import 'tailwindcss';
+
+/*
+ * Faceboard theme — pure grayscale base with a single restrained accent that is
+ * reserved for live / active states (detection on, a trigger firing).
+ */
+@theme {
+	--color-bg: #0a0a0b;
+	--color-surface-1: #141417;
+	--color-surface-2: #1b1b1f;
+	--color-surface-3: #232328;
+	--color-border: #2a2a30;
+	--color-border-strong: #3a3a42;
+	--color-text: #ededf0;
+	--color-muted: #8d8d96;
+	--color-faint: #5c5c64;
+	--color-accent: #7cc7ff;
+	--color-accent-dim: #3d6986;
+	--radius-card: 14px;
+}
+
+:root {
+	color-scheme: dark;
+}
+
+html,
+body {
+	height: 100%;
+}
+
+body {
+	margin: 0;
+	background: var(--color-bg);
+	color: var(--color-text);
+	font-family:
+		ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+	overflow: hidden;
+}
+
+/* Thin, monochrome scrollbars to match the aesthetic. */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--color-border-strong) transparent;
+}
+
+button {
+	font: inherit;
+	color: inherit;
+}
+
+/* The subtle accent glow used on live / active elements. */
+@keyframes fb-pulse {
+	0%,
+	100% {
+		opacity: 0.55;
+	}
+	50% {
+		opacity: 1;
+	}
+}
