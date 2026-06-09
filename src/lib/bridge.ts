@@ -21,6 +21,16 @@ export interface FaceboardApi {
 		read(filePath: string): Promise<ArrayBuffer>;
 		exists(filePath: string): Promise<boolean>;
 	};
+	shortcuts: {
+		register(accelerator: string | null): Promise<boolean>;
+	};
+	detection: {
+		onToggle(cb: () => void): () => void;
+		notifyState(active: boolean): void;
+	};
+	app: {
+		setBehavior(behavior: { closeToTray?: boolean; startMinimized?: boolean }): void;
+	};
 }
 
 export function getBridge(): FaceboardApi | null {

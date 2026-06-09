@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { engine } from '$lib/detection/engine.svelte';
+	import { app } from '$lib/stores/app.svelte';
+
+	// Mirror the whole preview (video + overlay together) so landmarks stay aligned.
+	const mirror = $derived(app.settings.general.mirror);
 
 	// Standard MediaPipe 21-point hand skeleton.
 	const HAND_CONNECTIONS: [number, number][] = [
@@ -58,7 +62,10 @@
 	});
 </script>
 
-<div class="relative h-full w-full overflow-hidden rounded-lg bg-surface-2">
+<div
+	class="relative h-full w-full overflow-hidden rounded-lg bg-surface-2"
+	style="transform: {mirror ? 'scaleX(-1)' : 'none'}"
+>
 	<!-- svelte-ignore a11y_media_has_caption -->
 	<video bind:this={videoEl} class="h-full w-full object-cover" muted playsinline></video>
 	<canvas bind:this={canvasEl} class="pointer-events-none absolute inset-0 h-full w-full"></canvas>

@@ -21,6 +21,23 @@ const api = {
 			ipcRenderer.invoke('dialog:open-sounds'),
 		read: (filePath: string): Promise<ArrayBuffer> => ipcRenderer.invoke('sound:read', filePath),
 		exists: (filePath: string): Promise<boolean> => ipcRenderer.invoke('sound:exists', filePath)
+	},
+	shortcuts: {
+		register: (accelerator: string | null): Promise<boolean> =>
+			ipcRenderer.invoke('shortcuts:register', accelerator)
+	},
+	detection: {
+		// Invoked from the global hotkey or the tray menu.
+		onToggle: (cb: () => void): (() => void) => {
+			const listener = () => cb();
+			ipcRenderer.on('detection:toggle', listener);
+			return () => ipcRenderer.removeListener('detection:toggle', listener);
+		},
+		notifyState: (active: boolean): void => ipcRenderer.send('detection:state', active)
+	},
+	app: {
+		setBehavior: (behavior: { closeToTray?: boolean; startMinimized?: boolean }): void =>
+			ipcRenderer.send('app:set-behavior', behavior)
 	}
 };
 

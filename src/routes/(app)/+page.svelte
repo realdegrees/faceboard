@@ -1,8 +1,9 @@
 <script lang="ts">
 	import CameraPreview from '$lib/components/CameraPreview.svelte';
 	import { engine } from '$lib/detection/engine.svelte';
+	import { startDetection, stopDetection, toggleDetection } from '$lib/detection/control';
 	import { app } from '$lib/stores/app.svelte';
-	import { runtime, neededModalities } from '$lib/triggers/runtime.svelte';
+	import { runtime } from '$lib/triggers/runtime.svelte';
 
 	const general = $derived(app.settings.general);
 
@@ -14,16 +15,6 @@
 			.slice(0, 6);
 	});
 
-	async function toggle() {
-		if (engine.active || engine.status === 'loading') {
-			engine.stop();
-		} else {
-			engine.targetFps = general.detectionFps;
-			engine.modalities = neededModalities(app.settings.triggers);
-			await engine.startLocal(general.cameraDeviceId);
-		}
-	}
-
 	const activeTriggers = $derived(
 		app.settings.triggers.filter((t) => runtime.activeIds.includes(t.id))
 	);
@@ -32,8 +23,8 @@
 		const id = (e.target as HTMLSelectElement).value || null;
 		app.setGeneral({ cameraDeviceId: id });
 		if (engine.active) {
-			engine.stop();
-			engine.startLocal(id);
+			stopDetection();
+			void startDetection();
 		}
 	}
 
@@ -55,7 +46,7 @@
 			<p class="mt-1 text-[13px] text-muted">Live camera, detection status and triggers.</p>
 		</div>
 		<button
-			onclick={toggle}
+			onclick={() => toggleDetection()}
 			class="rounded-lg px-4 py-2 text-[13px] font-medium transition-colors
 				{engine.active
 				? 'bg-surface-3 text-text hover:bg-surface-2'

@@ -6,22 +6,30 @@
 	import { engine } from '$lib/detection/engine.svelte';
 	import { runtime } from '$lib/triggers/runtime.svelte';
 	import { soundPlayer } from '$lib/audio/player.svelte';
+	import { startDetection, toggleDetection } from '$lib/detection/control';
 
 	let { children } = $props();
 
 	const bridge = getBridge();
 
-	// One-shot load of persisted settings + wire the matcher to detection frames
-	// and fired triggers to sound playback.
+	// Load persisted settings; wire the matcher to detection frames, fired triggers
+	// to sound playback, and the global hotkey / tray to detection toggling.
 	onMount(() => {
 		runtime.init();
 		runtime.onFire = (trigger) => {
 			if (trigger.soundId) void soundPlayer.play(trigger.soundId);
 		};
+		const offToggle = bridge?.detection.onToggle(() => void toggleDetection());
+
 		void (async () => {
 			await app.load();
 			soundPlayer.preloadAll();
+			const accel = app.settings.shortcuts.toggleDetection;
+			if (accel) await bridge?.shortcuts.register(accel);
+			if (app.settings.general.autostartDetection) await startDetection();
 		})();
+
+		return () => offToggle?.();
 	});
 
 	type NavItem = { href: string; label: string; icon: 'dashboard' | 'trigger' | 'sound' | 'settings' };

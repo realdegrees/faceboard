@@ -52,6 +52,8 @@ export interface GeneralSettings {
 	mirror: boolean;
 	startMinimized: boolean;
 	autostartDetection: boolean;
+	/** Hide to the tray (keep detecting) instead of quitting when the window closes. */
+	closeToTray: boolean;
 	/** Global multiplier applied to match scores (0.5..1.5). */
 	sensitivity: number;
 }
@@ -79,6 +81,7 @@ export function defaultSettings(): FaceboardSettings {
 			mirror: true,
 			startMinimized: false,
 			autostartDetection: false,
+			closeToTray: true,
 			sensitivity: 1
 		}
 	};
