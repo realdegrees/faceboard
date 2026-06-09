@@ -8,3 +8,6 @@ release/
 .DS_Store
 .env
 .vite/
+
+# Staged MediaPipe runtime + models (fetched by scripts/fetch-models.mjs)
+static/mediapipe/

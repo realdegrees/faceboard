@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, session, shell } from 'electron';
 import path from 'node:path';
 import serve from 'electron-serve';
 import { registerIpc } from './ipc';
@@ -73,6 +73,11 @@ if (!gotLock) {
 	});
 
 	app.whenReady().then(() => {
+		// Trusted local app — allow webcam/microphone for our own content.
+		session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+			callback(permission === 'media');
+		});
+		session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'media');
 		registerIpc();
 		return createWindow();
 	});

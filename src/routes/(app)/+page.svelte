@@ -1,25 +1,155 @@
 <script lang="ts">
-	// Dashboard — live camera preview, detection status and recent triggers land
-	// here in later milestones.
+	import CameraPreview from '$lib/components/CameraPreview.svelte';
+	import { engine } from '$lib/detection/engine.svelte';
+	import { app } from '$lib/stores/app.svelte';
+
+	const general = $derived(app.settings.general);
+
+	const topShapes = $derived.by(() => {
+		const bs = engine.face?.blendshapes;
+		if (!bs) return [] as [string, number][];
+		return Object.entries(bs)
+			.sort((a, b) => b[1] - a[1])
+			.slice(0, 6);
+	});
+
+	async function toggle() {
+		if (engine.active || engine.status === 'loading') {
+			engine.stop();
+		} else {
+			engine.targetFps = general.detectionFps;
+			await engine.startLocal(general.cameraDeviceId);
+		}
+	}
+
+	function onPickCamera(e: Event) {
+		const id = (e.target as HTMLSelectElement).value || null;
+		app.setGeneral({ cameraDeviceId: id });
+		if (engine.active) {
+			engine.stop();
+			engine.startLocal(id);
+		}
+	}
+
+	const statusLabel = $derived(
+		engine.status === 'running'
+			? `Live · ${engine.fps} fps`
+			: engine.status === 'loading'
+				? 'Starting…'
+				: engine.status === 'error'
+					? 'Error'
+					: 'Idle'
+	);
 </script>
 
 <section class="mx-auto max-w-5xl px-8 py-7">
-	<header class="mb-6">
-		<h1 class="text-[19px] font-semibold tracking-tight">Dashboard</h1>
-		<p class="mt-1 text-[13px] text-muted">Live camera, detection status and recent triggers.</p>
+	<header class="mb-6 flex items-end justify-between">
+		<div>
+			<h1 class="text-[19px] font-semibold tracking-tight">Dashboard</h1>
+			<p class="mt-1 text-[13px] text-muted">Live camera, detection status and triggers.</p>
+		</div>
+		<button
+			onclick={toggle}
+			class="rounded-lg px-4 py-2 text-[13px] font-medium transition-colors
+				{engine.active
+				? 'bg-surface-3 text-text hover:bg-surface-2'
+				: 'bg-accent/90 text-black hover:bg-accent'}"
+		>
+			{engine.active || engine.status === 'loading' ? 'Stop detection' : 'Start detection'}
+		</button>
 	</header>
 
 	<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+		<!-- Camera -->
 		<div class="lg:col-span-2 rounded-card border border-border bg-surface-1 p-4">
-			<div
-				class="grid aspect-video w-full place-items-center rounded-lg border border-dashed border-border-strong bg-surface-2 text-[13px] text-faint"
-			>
-				Camera preview
+			<div class="aspect-video w-full">
+				{#if engine.stream}
+					<CameraPreview />
+				{:else}
+					<div
+						class="grid h-full w-full place-items-center rounded-lg border border-dashed border-border-strong bg-surface-2 text-center text-[13px] text-faint"
+					>
+						{#if engine.status === 'error'}
+							<div class="px-6">
+								<p class="text-red-400/90">Camera error</p>
+								<p class="mt-1 text-faint">{engine.error}</p>
+							</div>
+						{:else}
+							Camera preview
+						{/if}
+					</div>
+				{/if}
+			</div>
+
+			<div class="mt-3 flex items-center justify-between gap-3">
+				<div class="flex items-center gap-2 text-[12px]">
+					<span
+						class="inline-block h-1.5 w-1.5 rounded-full {engine.active
+							? 'bg-accent'
+							: engine.status === 'error'
+								? 'bg-red-500'
+								: 'bg-faint'}"
+					></span>
+					<span class="text-muted">{statusLabel}</span>
+					{#if engine.active}
+						<span class="text-faint">· {app.settings.triggers.length} triggers</span>
+					{/if}
+				</div>
+				{#if engine.devices.length > 1}
+					<select
+						class="rounded-md border border-border bg-surface-2 px-2 py-1 text-[12px] text-muted outline-none focus:border-border-strong"
+						value={general.cameraDeviceId ?? ''}
+						onchange={onPickCamera}
+					>
+						<option value="">Default camera</option>
+						{#each engine.devices as d (d.deviceId)}
+							<option value={d.deviceId}>{d.label}</option>
+						{/each}
+					</select>
+				{/if}
 			</div>
 		</div>
-		<div class="rounded-card border border-border bg-surface-1 p-4">
-			<h2 class="text-[13px] font-medium text-muted">Status</h2>
-			<p class="mt-3 text-[13px] text-faint">Detection is idle.</p>
+
+		<!-- Live readout -->
+		<div class="flex flex-col gap-4">
+			<div class="rounded-card border border-border bg-surface-1 p-4">
+				<h2 class="mb-3 text-[12px] font-medium tracking-wide text-muted uppercase">Face</h2>
+				{#if topShapes.length}
+					<div class="flex flex-col gap-2">
+						{#each topShapes as [name, score] (name)}
+							<div class="flex items-center gap-2">
+								<span class="w-32 shrink-0 truncate text-[11px] text-faint">{name}</span>
+								<div class="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-3">
+									<div
+										class="h-full rounded-full bg-accent/80"
+										style="width: {Math.round(score * 100)}%"
+									></div>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{:else}
+					<p class="text-[12px] text-faint">No face detected.</p>
+				{/if}
+			</div>
+
+			<div class="rounded-card border border-border bg-surface-1 p-4">
+				<h2 class="mb-3 text-[12px] font-medium tracking-wide text-muted uppercase">Hands</h2>
+				{#if engine.hands.length}
+					<div class="flex flex-col gap-2">
+						{#each engine.hands as hand, i (i)}
+							<div class="flex items-center justify-between text-[12px]">
+								<span class="text-muted">{hand.handedness}</span>
+								<span class="text-faint">
+									{hand.gesture ? `${hand.gesture.name} ${Math.round(hand.gesture.score * 100)}%` : '—'}
+								</span>
+							</div>
+						{/each}
+					</div>
+				{:else}
+					<p class="text-[12px] text-faint">No hands detected.</p>
+				{/if}
+			</div>
 		</div>
 	</div>
 </section>

@@ -8,6 +8,9 @@
   "author": "realdegrees",
   "license": "MIT",
   "scripts": {
+    "models": "node scripts/fetch-models.mjs",
+    "predev": "node scripts/fetch-models.mjs --require",
+    "prebuild": "node scripts/fetch-models.mjs --require",
     "dev": "concurrently -k -n vite,electron -c blue,green \"npm:dev:vite\" \"npm:dev:electron\"",
     "dev:vite": "vite dev",
     "dev:electron": "npm run build:main && wait-on tcp:127.0.0.1:5173 && cross-env NODE_ENV=development electron .",

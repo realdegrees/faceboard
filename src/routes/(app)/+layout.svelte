@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { getBridge } from '$lib/bridge';
 	import { app } from '$lib/stores/app.svelte';
+	import { engine } from '$lib/detection/engine.svelte';
 
 	let { children } = $props();
 
@@ -89,10 +90,25 @@
 				{/each}
 			</div>
 
-			<div class="mt-auto rounded-lg border border-border bg-surface-1 px-3 py-2.5 text-[11px] text-faint">
+			<div class="mt-auto rounded-lg border border-border bg-surface-1 px-3 py-2.5 text-[11px]">
 				<div class="flex items-center gap-2">
-					<span class="inline-block h-1.5 w-1.5 rounded-full bg-faint"></span>
-					<span>Detection idle</span>
+					<span
+						class="inline-block h-1.5 w-1.5 rounded-full {engine.active
+							? 'bg-accent'
+							: engine.status === 'error'
+								? 'bg-red-500'
+								: 'bg-faint'}"
+						style={engine.active ? 'animation: fb-pulse 2s ease-in-out infinite;' : ''}
+					></span>
+					<span class={engine.active ? 'text-muted' : 'text-faint'}>
+						{engine.status === 'running'
+							? `Detection live · ${engine.fps} fps`
+							: engine.status === 'loading'
+								? 'Starting…'
+								: engine.status === 'error'
+									? 'Detection error'
+									: 'Detection idle'}
+					</span>
 				</div>
 			</div>
 		</nav>
