@@ -111,6 +111,13 @@ class DetectionEngine {
 		}
 	}
 
+	/** Ensure the given modalities are active, lazily creating detectors if the
+	 * engine is already running. */
+	async ensureModalities(modalities: ModalityFlags): Promise<void> {
+		this.modalities = modalities;
+		if (this.status === 'running') await this.#detector.init(modalities);
+	}
+
 	async refreshDevices(): Promise<void> {
 		try {
 			const all = await navigator.mediaDevices.enumerateDevices();
@@ -144,7 +151,7 @@ class DetectionEngine {
 
 		let frame: DetectionFrame;
 		try {
-			frame = this.#detector.detect(v, ts);
+			frame = this.#detector.detect(v, ts, this.modalities);
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : String(err);
 			return;

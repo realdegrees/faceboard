@@ -13,6 +13,11 @@ const buildDir = path.join(__dirname, '..', 'build');
 const errors = [];
 
 app.whenReady().then(async () => {
+	if (process.env.FB_PRELOAD) {
+		const { registerIpc } = require(path.join(__dirname, '..', 'dist-electron', 'ipc.cjs'));
+		registerIpc();
+	}
+
 	const server = express();
 	server.use(express.static(buildDir));
 	server.get('*', (_req, res) => res.sendFile(path.join(buildDir, '200.html')));
@@ -23,7 +28,10 @@ app.whenReady().then(async () => {
 		width: 1140,
 		height: 740,
 		show: true,
-		backgroundColor: '#0a0a0b'
+		backgroundColor: '#0a0a0b',
+		webPreferences: process.env.FB_PRELOAD
+			? { preload: path.join(__dirname, '..', 'dist-electron', 'preload.cjs'), contextIsolation: true, sandbox: true }
+			: {}
 	});
 
 	win.webContents.on('console-message', (_e, level, message) => {

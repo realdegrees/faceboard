@@ -74,11 +74,11 @@ export class Detector {
 		}
 	}
 
-	detect(video: HTMLVideoElement, tsMs: number): DetectionFrame {
+	detect(video: HTMLVideoElement, tsMs: number, modalities: ModalityFlags): DetectionFrame {
 		let face: FaceData | null = null;
 		let hands: HandData[] = [];
-		if (this.#face) face = toFace(this.#face.detectForVideo(video, tsMs));
-		if (this.#hand) hands = toHands(this.#hand.recognizeForVideo(video, tsMs));
+		if (this.#face && modalities.face) face = toFace(this.#face.detectForVideo(video, tsMs));
+		if (this.#hand && modalities.hand) hands = toHands(this.#hand.recognizeForVideo(video, tsMs));
 		return { tsMs, face, hands };
 	}
 

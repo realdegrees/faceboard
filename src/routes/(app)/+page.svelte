@@ -2,6 +2,7 @@
 	import CameraPreview from '$lib/components/CameraPreview.svelte';
 	import { engine } from '$lib/detection/engine.svelte';
 	import { app } from '$lib/stores/app.svelte';
+	import { runtime, neededModalities } from '$lib/triggers/runtime.svelte';
 
 	const general = $derived(app.settings.general);
 
@@ -18,9 +19,14 @@
 			engine.stop();
 		} else {
 			engine.targetFps = general.detectionFps;
+			engine.modalities = neededModalities(app.settings.triggers);
 			await engine.startLocal(general.cameraDeviceId);
 		}
 	}
+
+	const activeTriggers = $derived(
+		app.settings.triggers.filter((t) => runtime.activeIds.includes(t.id))
+	);
 
 	function onPickCamera(e: Event) {
 		const id = (e.target as HTMLSelectElement).value || null;
@@ -148,6 +154,32 @@
 					</div>
 				{:else}
 					<p class="text-[12px] text-faint">No hands detected.</p>
+				{/if}
+			</div>
+
+			<div class="rounded-card border border-border bg-surface-1 p-4">
+				<h2 class="mb-3 text-[12px] font-medium tracking-wide text-muted uppercase">Activity</h2>
+				{#if activeTriggers.length}
+					<div class="mb-3 flex flex-wrap gap-1.5">
+						{#each activeTriggers as t (t.id)}
+							<span
+								class="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[11px] text-accent"
+								style="animation: fb-pulse 1.4s ease-in-out infinite;">{t.name}</span
+							>
+						{/each}
+					</div>
+				{/if}
+				{#if runtime.recent.length}
+					<div class="flex flex-col gap-1.5">
+						{#each runtime.recent.slice(0, 5) as r (r.ts)}
+							<div class="flex items-center justify-between text-[12px]">
+								<span class="text-muted">{r.name}</span>
+								<span class="text-faint">fired</span>
+							</div>
+						{/each}
+					</div>
+				{:else}
+					<p class="text-[12px] text-faint">No triggers fired yet.</p>
 				{/if}
 			</div>
 		</div>

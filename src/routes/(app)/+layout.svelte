@@ -4,14 +4,16 @@
 	import { getBridge } from '$lib/bridge';
 	import { app } from '$lib/stores/app.svelte';
 	import { engine } from '$lib/detection/engine.svelte';
+	import { runtime } from '$lib/triggers/runtime.svelte';
 
 	let { children } = $props();
 
 	const bridge = getBridge();
 
-	// One-shot load of persisted settings from the main process.
+	// One-shot load of persisted settings + wire the matcher to detection frames.
 	onMount(() => {
 		void app.load();
+		runtime.init();
 	});
 
 	type NavItem = { href: string; label: string; icon: 'dashboard' | 'trigger' | 'sound' | 'settings' };

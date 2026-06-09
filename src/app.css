@@ -50,6 +50,33 @@ button {
 	color: inherit;
 }
 
+/* Monochrome range slider. */
+.fb-range {
+	-webkit-appearance: none;
+	appearance: none;
+	height: 4px;
+	border-radius: 9999px;
+	background: var(--color-surface-3);
+	outline: none;
+}
+.fb-range::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 14px;
+	height: 14px;
+	border-radius: 9999px;
+	background: var(--color-accent);
+	cursor: pointer;
+}
+.fb-range::-moz-range-thumb {
+	width: 14px;
+	height: 14px;
+	border: none;
+	border-radius: 9999px;
+	background: var(--color-accent);
+	cursor: pointer;
+}
+
 /* The subtle accent glow used on live / active elements. */
 @keyframes fb-pulse {
 	0%,
