@@ -12,6 +12,10 @@ export interface FaceboardApi {
 		toggleMaximize(): void;
 		isMaximized(): Promise<boolean>;
 	};
+	settings: {
+		get(): Promise<unknown | null>;
+		set(doc: unknown): Promise<void>;
+	};
 }
 
 export function getBridge(): FaceboardApi | null {

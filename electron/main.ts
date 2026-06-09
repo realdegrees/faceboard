@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import serve from 'electron-serve';
+import { registerIpc } from './ipc';
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -71,7 +72,10 @@ if (!gotLock) {
 		}
 	});
 
-	app.whenReady().then(createWindow);
+	app.whenReady().then(() => {
+		registerIpc();
+		return createWindow();
+	});
 
 	app.on('window-all-closed', () => {
 		if (process.platform !== 'darwin') app.quit();

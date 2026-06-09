@@ -11,6 +11,10 @@ const api = {
 		close: () => ipcRenderer.send('window:close'),
 		toggleMaximize: () => ipcRenderer.send('window:toggle-maximize'),
 		isMaximized: (): Promise<boolean> => ipcRenderer.invoke('window:is-maximized')
+	},
+	settings: {
+		get: (): Promise<unknown | null> => ipcRenderer.invoke('settings:get'),
+		set: (doc: unknown): Promise<void> => ipcRenderer.invoke('settings:set', doc)
 	}
 };
 

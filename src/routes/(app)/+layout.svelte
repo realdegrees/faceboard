@@ -1,10 +1,17 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { getBridge } from '$lib/bridge';
+	import { app } from '$lib/stores/app.svelte';
 
 	let { children } = $props();
 
 	const bridge = getBridge();
+
+	// One-shot load of persisted settings from the main process.
+	onMount(() => {
+		void app.load();
+	});
 
 	type NavItem = { href: string; label: string; icon: 'dashboard' | 'trigger' | 'sound' | 'settings' };
 	const nav: NavItem[] = [

@@ -25,7 +25,10 @@ await esbuild.build({
 	...common,
 	entryPoints: {
 		main: 'electron/main.ts',
-		preload: 'electron/preload.ts'
+		preload: 'electron/preload.ts',
+		// Built separately too so the integration harness can register the same
+		// IPC handlers the real app uses.
+		ipc: 'electron/ipc.ts'
 	}
 });
 
