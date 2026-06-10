@@ -126,18 +126,12 @@ class PhoneHost {
 			if (signal.orientation) this.peerOrientation = signal.orientation;
 			return;
 		}
-		if (signal.type === 'rotate') {
-			this.rotate();
-			return;
-		}
-
 		const pc = this.#ensurePc();
 		if (signal.type === 'offer' && signal.sdp) {
 			await pc.setRemoteDescription(signal.sdp);
 			const answer = await pc.createAnswer();
 			await pc.setLocalDescription(answer);
 			this.#sig?.send({ type: 'answer', sdp: pc.localDescription ?? undefined });
-			this.#sig?.send({ type: 'meta', rotation: engine.rotation });
 		} else if (signal.type === 'candidate' && signal.candidate) {
 			try {
 				await pc.addIceCandidate(signal.candidate);
@@ -152,10 +146,10 @@ class PhoneHost {
 		this.#sig?.send({ type: 'flip' });
 	}
 
-	/** Rotate the desktop preview + detection 90° and tell the phone (display). */
+	/** Ask the phone to rotate its OUTGOING stream 90°, so the desktop receives an
+	 *  already-oriented feed instead of rotating its own received copy. */
 	rotate(): void {
-		engine.rotation = (engine.rotation + 90) % 360;
-		this.#sig?.send({ type: 'meta', rotation: engine.rotation });
+		this.#sig?.send({ type: 'rotate' });
 	}
 
 	#teardownPc(): void {

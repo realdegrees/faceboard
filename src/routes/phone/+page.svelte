@@ -16,6 +16,37 @@
 	let displayCanvas = $state<HTMLCanvasElement>();
 	let aspect = $state(3 / 4);
 
+	// Rotation is applied to the OUTGOING stream (a canvas drawn from the camera),
+	// so the PC receives an already-oriented feed instead of rotating its copy.
+	let streamRotation = $state(0);
+	let outCanvas: HTMLCanvasElement | null = null;
+	let streamingCanvas = false;
+
+	/** Draw the camera into the outgoing canvas, rotated by streamRotation. Returns
+	 *  the (rotated) dimensions. This canvas is what gets streamed to the PC. */
+	function drawOutgoing(): { w: number; h: number } | null {
+		const v = selfVideo;
+		if (!v || !v.videoWidth) return null;
+		const oc = (outCanvas ??= document.createElement('canvas'));
+		const vw = v.videoWidth;
+		const vh = v.videoHeight;
+		const r = ((streamRotation % 360) + 360) % 360;
+		const swap = r === 90 || r === 270;
+		const w = swap ? vh : vw;
+		const h = swap ? vw : vh;
+		if (oc.width !== w) oc.width = w;
+		if (oc.height !== h) oc.height = h;
+		const ctx = oc.getContext('2d');
+		if (ctx) {
+			ctx.save();
+			ctx.translate(w / 2, h / 2);
+			if (r) ctx.rotate((r * Math.PI) / 180);
+			ctx.drawImage(v, -vw / 2, -vh / 2, vw, vh);
+			ctx.restore();
+		}
+		return { w, h };
+	}
+
 	// The overlay (mesh/skeleton) is computed on the PC from the streamed video and
 	// sent back, so it lags the live picture. Delay the displayed video by roughly
 	// that round trip so the two line up. A frame ring buffer holds recent frames;
@@ -26,7 +57,7 @@
 	const delayTs: number[] = [];
 	let delayHead = 0;
 
-	function drawDelayedVideo(v: HTMLVideoElement, w: number, h: number) {
+	function drawDelayedVideo(src: CanvasImageSource, w: number, h: number) {
 		const dc = displayCanvas;
 		if (!dc) return;
 		if (delayPool.length === 0) {
@@ -39,7 +70,7 @@
 		const cap = delayPool[delayHead];
 		if (cap.width !== w) cap.width = w;
 		if (cap.height !== h) cap.height = h;
-		cap.getContext('2d')?.drawImage(v, 0, 0, w, h);
+		cap.getContext('2d')?.drawImage(src, 0, 0, w, h);
 		delayTs[delayHead] = now;
 		delayHead = (delayHead + 1) % DELAY_POOL;
 
@@ -134,6 +165,10 @@
 				void flip();
 				return;
 			}
+			if (p.type === 'rotate') {
+				rotateStream();
+				return;
+			}
 			if (p.type === 'meta') {
 				if (typeof p.rotation === 'number') remoteRotation = p.rotation;
 				return;
@@ -195,7 +230,22 @@
 					handsLm = m.h;
 				}
 			};
-			for (const t of stream.getTracks()) sender = pc.addTrack(t, stream);
+			// Stream the rotated outgoing canvas so the PC gets an oriented feed.
+			// Fall back to the raw camera track if canvas capture isn't available.
+			let outTrack: MediaStreamTrack | null = null;
+			try {
+				drawOutgoing();
+				const oc = (outCanvas ??= document.createElement('canvas'));
+				outTrack = oc.captureStream(30).getVideoTracks()[0] ?? null;
+			} catch {
+				outTrack = null;
+			}
+			streamingCanvas = !!outTrack;
+			if (outTrack) {
+				sender = pc.addTrack(outTrack, stream);
+			} else {
+				for (const t of stream.getTracks()) sender = pc.addTrack(t, stream);
+			}
 			const offer = await pc.createOffer();
 			await pc.setLocalDescription(offer);
 			sig?.send({ type: 'offer', sdp: pc.localDescription ?? undefined });
@@ -208,14 +258,15 @@
 
 	function drawOverlay() {
 		requestAnimationFrame(drawOverlay);
-		const v = selfVideo;
+		// Update the rotated outgoing canvas (this is what's streamed + detected).
+		const out = drawOutgoing();
 		const c = overlayCanvas;
-		if (!v || !c || !v.videoWidth) return;
-		const w = (c.width = v.videoWidth);
-		const h = (c.height = v.videoHeight);
+		if (!out || !c || !outCanvas) return;
+		const w = (c.width = out.w);
+		const h = (c.height = out.h);
 		if (Math.abs(aspect - w / h) > 1e-3) aspect = w / h;
-		// Show the video delayed to match the overlay's network round trip.
-		drawDelayedVideo(v, w, h);
+		// Show the rotated video delayed to match the overlay's network round trip.
+		drawDelayedVideo(outCanvas, w, h);
 		const ctx = c.getContext('2d');
 		if (!ctx) return;
 		ctx.clearRect(0, 0, w, h);
@@ -260,26 +311,27 @@
 		try {
 			const next = await getCameraStream(nf);
 			facing = nf;
-			const track = next.getVideoTracks()[0];
-			if (sender) await sender.replaceTrack(track);
 			stream = next;
-			attachSelf();
+			attachSelf(); // the outgoing canvas redraws from the new camera
+			// In the raw-track fallback the outgoing track IS the camera, so swap it.
+			if (!streamingCanvas && sender) await sender.replaceTrack(next.getVideoTracks()[0]);
 			sendMeta();
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
 			try {
 				const back = await getCameraStream(facing);
-				if (sender) await sender.replaceTrack(back.getVideoTracks()[0]);
 				stream = back;
 				attachSelf();
+				if (!streamingCanvas && sender) await sender.replaceTrack(back.getVideoTracks()[0]);
 			} catch {
 				/* ignore */
 			}
 		}
 	}
 
-	function requestRotate() {
-		sig?.send({ type: 'rotate' });
+	/** Rotate the outgoing stream 90° (so the PC gets an oriented feed). */
+	function rotateStream() {
+		streamRotation = (streamRotation + 90) % 360;
 	}
 
 	function cleanup() {
@@ -383,7 +435,7 @@
 				Flip
 			</button>
 			<button
-				onclick={(e) => { e.stopPropagation(); requestRotate(); }}
+				onclick={(e) => { e.stopPropagation(); rotateStream(); }}
 				aria-label="Rotate 90 degrees"
 				class="flex items-center gap-1.5 rounded-lg bg-black/50 px-2.5 py-1.5 text-[12px] text-white/90 backdrop-blur-sm transition-colors active:bg-black/70"
 			>

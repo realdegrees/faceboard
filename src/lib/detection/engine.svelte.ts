@@ -230,6 +230,8 @@ class DetectionEngine {
 			await this.#ensureDetector(this.modalities);
 			this.#external = true;
 			this.source = 'phone';
+			// The phone rotates its own outgoing stream, so don't rotate it here.
+			this.rotation = 0;
 			await this.#useStream(stream);
 			this.detecting = true;
 			this.#startLoop();
