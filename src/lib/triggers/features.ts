@@ -55,3 +55,127 @@ export function bestCosine(cur: number[], samples: number[][]): number {
 	}
 	return best;
 }
+
+// --- Two-hand + dynamic gesture helpers ------------------------------------
+
+/** Order detected hands into stable slots: Left then Right (fallback by wrist x).
+ *  Returns null if fewer than `count` hands are present. */
+export function orderHands(hands: HandData[], count: 1 | 2): HandData[] | null {
+	if (count === 1) return hands.length ? [hands[0]] : null;
+	if (hands.length < 2) return null;
+	const left = hands.find((h) => h.handedness === 'Left');
+	const right = hands.find((h) => h.handedness === 'Right');
+	if (left && right && left !== right) return [left, right];
+	const sorted = [...hands].sort((a, b) => a.landmarks[0].x - b.landmarks[0].x);
+	return [sorted[0], sorted[1]];
+}
+
+/** Raw image-space landmark vector for the given hands (used per-frame in motion
+ *  sequences, where absolute position carries the gesture). */
+export function handsFrameVector(hands: HandData[]): number[] {
+	const out: number[] = [];
+	for (const h of hands) for (const p of h.landmarks) out.push(p.x, p.y, p.z);
+	return out;
+}
+
+/** Static-pose vector: centroid-centred + RMS-scaled over all involved hands.
+ *  Position/scale invariant; orientation and inter-hand geometry preserved. */
+export function normalizeStaticPose(hands: HandData[]): number[] {
+	const pts: [number, number, number][] = [];
+	for (const h of hands) for (const p of h.landmarks) pts.push([p.x, p.y, p.z]);
+	const n = pts.length || 1;
+	const c: [number, number, number] = [0, 0, 0];
+	for (const p of pts) {
+		c[0] += p[0];
+		c[1] += p[1];
+		c[2] += p[2];
+	}
+	c[0] /= n;
+	c[1] /= n;
+	c[2] /= n;
+	let ss = 0;
+	for (const p of pts) ss += (p[0] - c[0]) ** 2 + (p[1] - c[1]) ** 2 + (p[2] - c[2]) ** 2;
+	const scale = Math.sqrt(ss / n) || 1e-6;
+	const out: number[] = [];
+	for (const p of pts) out.push((p[0] - c[0]) / scale, (p[1] - c[1]) / scale, (p[2] - c[2]) / scale);
+	return out;
+}
+
+/** Frames a dynamic gesture template/window is resampled to. */
+export const DYN_LEN = 24;
+
+/** Mean-centre (per axis) + global-scale a whole motion sequence so the gesture
+ *  is position/scale invariant while the relative motion + shape is preserved. */
+export function normalizeSequence(seq: number[][]): number[][] {
+	if (!seq.length) return seq;
+	const mean = [0, 0, 0];
+	const cnt = [0, 0, 0];
+	for (const f of seq)
+		for (let i = 0; i < f.length; i++) {
+			const a = i % 3;
+			mean[a] += f[i];
+			cnt[a]++;
+		}
+	for (let a = 0; a < 3; a++) mean[a] /= cnt[a] || 1;
+	let ss = 0;
+	let sc = 0;
+	for (const f of seq)
+		for (let i = 0; i < f.length; i++) {
+			ss += (f[i] - mean[i % 3]) ** 2;
+			sc++;
+		}
+	const scale = Math.sqrt(ss / (sc || 1)) || 1e-6;
+	return seq.map((f) => f.map((v, i) => (v - mean[i % 3]) / scale));
+}
+
+/** Linear-interpolate a sequence to a fixed length. */
+export function resampleSequence(seq: number[][], length: number): number[][] {
+	if (seq.length === 0) return [];
+	if (seq.length === 1) return Array.from({ length }, () => seq[0].slice());
+	const out: number[][] = [];
+	for (let i = 0; i < length; i++) {
+		const t = (i / (length - 1)) * (seq.length - 1);
+		const lo = Math.floor(t);
+		const hi = Math.min(lo + 1, seq.length - 1);
+		const frac = t - lo;
+		const a = seq[lo];
+		const b = seq[hi];
+		out.push(a.map((v, j) => v + (b[j] - v) * frac));
+	}
+	return out;
+}
+
+/** DTW distance between two equal-dim sequences, normalized by path length. */
+export function dtw(a: number[][], b: number[][]): number {
+	const n = a.length;
+	const m = b.length;
+	if (!n || !m) return Infinity;
+	let prev = new Array(m + 1).fill(Infinity);
+	prev[0] = 0;
+	for (let i = 1; i <= n; i++) {
+		const cur = new Array(m + 1).fill(Infinity);
+		const fa = a[i - 1];
+		for (let j = 1; j <= m; j++) {
+			const fb = b[j - 1];
+			let s = 0;
+			const d = Math.min(fa.length, fb.length);
+			for (let k = 0; k < d; k++) {
+				const e = fa[k] - fb[k];
+				s += e * e;
+			}
+			cur[j] = Math.sqrt(s) + Math.min(prev[j], cur[j - 1], prev[j - 1]);
+		}
+		prev = cur;
+	}
+	return prev[m] / (n + m);
+}
+
+/** Map a normalized DTW distance to a [0,1] match score. */
+export function dynamicScore(dist: number): number {
+	return clamp01(1 - dist / 0.7);
+}
+
+/** Turn a recorded take into a stored template (normalized + resampled). */
+export function toTemplate(rawSeq: number[][]): number[][] {
+	return resampleSequence(normalizeSequence(rawSeq), DYN_LEN);
+}

@@ -1,7 +1,19 @@
 // Unit tests for the feature-extraction + matching logic. Bundled and run via
 // scripts/run-matching-test.mjs.
 import { scoreTrigger } from '../src/lib/triggers/matcher';
-import { faceVector, normalizeHand, cosine } from '../src/lib/triggers/features';
+import {
+	faceVector,
+	normalizeHand,
+	cosine,
+	orderHands,
+	normalizeStaticPose,
+	handsFrameVector,
+	normalizeSequence,
+	resampleSequence,
+	dtw,
+	toTemplate,
+	DYN_LEN
+} from '../src/lib/triggers/features';
 import type { DetectionFrame, FaceData, HandData, HandPoint } from '../src/lib/detection/types';
 import type { Trigger } from '../src/lib/types';
 
@@ -58,9 +70,43 @@ const h1 = hand('Open_Palm');
 const h1moved = hand('Open_Palm', 0.9, [0.3, -0.2, 2.5]);
 assert(cosine(normalizeHand(h1), normalizeHand(h1moved)) > 0.999, 'hand normalization is translation + scale invariant');
 
-// --- custom hand ---
-const customHand = mkTrigger({ modality: 'hand', kind: 'custom', samples: [normalizeHand(h1)], threshold: 0.9 });
-assert(scoreTrigger(customHand, { tsMs: 0, face: null, hands: [h1moved] }) > 0.99, 'custom hand matches the same pose moved/scaled');
+// --- custom hand (static, 1 hand) ---
+const customHand = mkTrigger({ modality: 'hand', kind: 'custom', motion: 'static', hands: 1, samples: [normalizeStaticPose([h1])], threshold: 0.9 });
+assert(scoreTrigger(customHand, { tsMs: 0, face: null, hands: [h1moved] }) > 0.99, 'custom 1-hand pose matches the same pose moved/scaled');
+
+// --- orderHands ---
+function handWith(handedness: string, tf: [number, number, number]): HandData {
+	return { handedness, gesture: null, landmarks: handPts(tf[0], tf[1], tf[2]) };
+}
+const L = handWith('Left', [0.1, 0, 1]);
+const R = handWith('Right', [0.6, 0, 1]);
+assert(orderHands([R, L], 2)?.[0].handedness === 'Left', 'orderHands puts Left first');
+assert(orderHands([L], 2) === null, 'orderHands needs 2 hands for count 2');
+
+// --- static 2-hand pose (both hands transformed together) ---
+const twoHand = mkTrigger({ modality: 'hand', kind: 'custom', motion: 'static', hands: 2, samples: [normalizeStaticPose([L, R])], threshold: 0.9 });
+const Lm = handWith('Left', [0.4, 0.3, 2]); // L under translate (0.2,0.3) + scale 2
+const Rm = handWith('Right', [1.4, 0.3, 2]); // R under the same transform
+assert(scoreTrigger(twoHand, { tsMs: 0, face: null, hands: [Rm, Lm] }) > 0.95, 'custom 2-hand pose matches when both hands move together');
+assert(scoreTrigger(twoHand, { tsMs: 0, face: null, hands: [Lm] }) === 0, '2-hand pose scores 0 with one hand');
+
+// --- resample + DTW (dynamic gestures) ---
+assert(resampleSequence([[0], [1], [2], [3]], 8).length === 8, 'resampleSequence hits target length');
+function moveSeq(fromX: number, toX: number, frames: number): number[][] {
+	const out: number[][] = [];
+	for (let i = 0; i < frames; i++) {
+		const x = fromX + (toX - fromX) * (i / (frames - 1));
+		out.push(handsFrameVector([handWith('Right', [x, 0, 1])]));
+	}
+	return out;
+}
+const tmpl = toTemplate(moveSeq(0.2, 0.8, 30));
+assert(tmpl.length === DYN_LEN, 'template resampled to DYN_LEN');
+assert(dtw(tmpl, tmpl) < 1e-6, 'dtw of identical sequences is ~0');
+const dSame = dtw(tmpl, toTemplate(moveSeq(0.35, 0.95, 18))); // same path, shifted + different speed
+const dRev = dtw(tmpl, toTemplate(moveSeq(0.8, 0.2, 24))); // reversed motion
+assert(dSame < dRev, 'dtw: same motion closer than reversed motion');
+assert(dSame < 0.15, 'dtw: position-shifted + speed-varied motion is a strong match');
 
 console.log(failures === 0 ? 'ALL_PASS' : 'FAILURES=' + failures);
 process.exit(failures === 0 ? 0 : 1);

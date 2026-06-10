@@ -15,6 +15,14 @@ export interface Trigger {
 	samples?: number[][];
 	/** Optional neutral baseline subtracted before matching. */
 	neutral?: number[];
+	/** Hand triggers: number of hands the trigger uses (default 1). */
+	hands?: 1 | 2;
+	/** Hand triggers: held pose vs moving gesture (default 'static'). */
+	motion?: 'static' | 'dynamic';
+	/** Dynamic gestures: few-shot motion templates (normalized + resampled). */
+	sequences?: number[][][];
+	/** Dynamic gestures: typical recorded duration (ms), sizes the live window. */
+	durationMs?: number;
 	/** Match score threshold in [0,1] — higher is stricter. */
 	threshold: number;
 	/** Match must be sustained this long (ms) before the sound fires. */

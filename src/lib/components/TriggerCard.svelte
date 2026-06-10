@@ -46,6 +46,11 @@
 				>
 					{trigger.kind === 'builtin' ? 'Preset' : 'Custom'}
 				</span>
+				{#if trigger.modality === 'hand' && trigger.kind === 'custom'}
+					<span class="shrink-0 text-[10px] text-faint">
+						{trigger.hands === 2 ? '2-hand' : '1-hand'} · {trigger.motion === 'dynamic' ? 'gesture' : 'pose'}
+					</span>
+				{/if}
 			</div>
 		</div>
 

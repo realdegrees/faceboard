@@ -1,7 +1,7 @@
 import type { Trigger } from '../types';
 import type { DetectionFrame } from '../detection/types';
 import { getPreset } from './presets';
-import { bestCosine, faceVector, normalizeHand, subtractNeutral } from './features';
+import { bestCosine, faceVector, normalizeStaticPose, orderHands, subtractNeutral } from './features';
 
 /** Activation score in [0,1] for a trigger against one detection frame. */
 export function scoreTrigger(trigger: Trigger, frame: DetectionFrame): number {
@@ -37,13 +37,19 @@ function scoreCustom(trigger: Trigger, frame: DetectionFrame): number {
 		return clampScore(bestCosine(cur, refs));
 	}
 
-	// hand: best similarity over all detected hands
-	let best = 0;
-	for (const h of frame.hands) {
-		const s = bestCosine(normalizeHand(h), samples);
-		if (s > best) best = s;
+	// hand static poses (dynamic gestures are matched temporally in the runtime)
+	if (trigger.motion === 'dynamic') return 0;
+	const count = trigger.hands === 2 ? 2 : 1;
+	if (count === 1) {
+		let best = 0;
+		for (const h of frame.hands) {
+			best = Math.max(best, bestCosine(normalizeStaticPose([h]), samples));
+		}
+		return clampScore(best);
 	}
-	return clampScore(best);
+	const ordered = orderHands(frame.hands, 2);
+	if (!ordered) return 0;
+	return clampScore(bestCosine(normalizeStaticPose(ordered), samples));
 }
 
 function clampScore(x: number): number {

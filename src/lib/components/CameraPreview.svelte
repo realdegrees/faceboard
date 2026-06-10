@@ -39,13 +39,19 @@
 	// Redraw the face mesh + hand skeleton overlay whenever a new frame lands.
 	$effect(() => {
 		const c = canvasEl;
+		const v = videoEl;
 		const face = engine.face;
 		const hands = engine.hands;
 		if (!c) return;
 		const ctx = c.getContext('2d');
 		if (!ctx) return;
-		const w = (c.width = c.clientWidth);
-		const h = (c.height = c.clientHeight);
+		// Size the canvas to the video's INTRINSIC resolution (not the display box)
+		// and let it object-cover identically to the <video>, so landmarks — which
+		// are normalized to the video frame — overlay the face without distortion.
+		const w = v && v.videoWidth ? v.videoWidth : c.clientWidth;
+		const h = v && v.videoHeight ? v.videoHeight : c.clientHeight;
+		if (c.width !== w) c.width = w;
+		if (c.height !== h) c.height = h;
 		ctx.clearRect(0, 0, w, h);
 		const du = getDrawer(ctx);
 
@@ -75,5 +81,8 @@
 >
 	<!-- svelte-ignore a11y_media_has_caption -->
 	<video bind:this={videoEl} class="h-full w-full object-cover" muted playsinline></video>
-	<canvas bind:this={canvasEl} class="pointer-events-none absolute inset-0 h-full w-full"></canvas>
+	<canvas
+		bind:this={canvasEl}
+		class="pointer-events-none absolute inset-0 h-full w-full object-cover"
+	></canvas>
 </div>
