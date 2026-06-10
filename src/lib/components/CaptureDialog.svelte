@@ -88,6 +88,7 @@
 	});
 	onDestroy(() => {
 		if (recordTimer) clearInterval(recordTimer);
+		if (neutralFlashTimer) clearTimeout(neutralFlashTimer);
 		cancelCountdown();
 		// The dialog narrowed detection to the captured modality; restore both so
 		// the dashboard's face mesh AND hand skeleton resume.
@@ -99,9 +100,14 @@
 	);
 
 	// --- Face ---
+	let neutralFlash = $state(false);
+	let neutralFlashTimer: ReturnType<typeof setTimeout> | null = null;
 	function captureNeutral() {
 		if (!engine.face) return;
 		app.setGeneral({ faceNeutral: faceVector(engine.face).map(r4) });
+		neutralFlash = true;
+		if (neutralFlashTimer) clearTimeout(neutralFlashTimer);
+		neutralFlashTimer = setTimeout(() => (neutralFlash = false), 1800);
 	}
 	function captureFace() {
 		if (!engine.face) return;
@@ -226,7 +232,7 @@
 				rotationInvariant: ignoreRotation,
 				eitherHand,
 				samples: $state.snapshot(samples) as number[][],
-				threshold: 0.9,
+				threshold: 0.85,
 				cooldownMs: 800
 			});
 		}
@@ -331,6 +337,9 @@
 						>
 							Re-set neutral face
 						</button>
+						{#if neutralFlash}
+							<p class="mt-2 text-[11px] text-accent">Neutral face updated ✓</p>
+						{/if}
 					</div>
 				{:else}
 					<div class="rounded-lg border border-accent/40 bg-accent/5 px-3 py-2.5 text-[12px] text-text">

@@ -15,12 +15,6 @@ export function subtractNeutral(v: number[], neutral?: number[]): number[] {
 	return v.map((x, i) => Math.max(0, x - (neutral[i] ?? 0)));
 }
 
-function norm(v: number[]): number {
-	let s = 0;
-	for (const x of v) s += x * x;
-	return Math.sqrt(s);
-}
-
 /** Distance between two head poses in degrees (tilt weighted a little less than
  *  turn/nod, since it's the least deliberate axis). */
 export function headPoseDistance(a: HeadPose, b: HeadPose): number {
@@ -36,12 +30,15 @@ const STRENGTH_FRAC = 0.55; // fraction of the captured strength needed for full
 const POSE_TOL_DEG = 22; // head-pose match tolerance
 
 /**
- * Neutral-relative expression match in [0,1]. The score is the *pattern* match
- * (cosine of the activation delta vs neutral — which auto-weights by whatever
- * muscles actually moved when captured) times the *strength* (how hard the
- * expression is made), with an optional head-pose gate. A pure head-pose capture
- * (no expression) scores on head pose alone. Lighting/face-shape differences fall
- * out because everything is relative to the user's own neutral.
+ * Neutral-relative expression match in [0,1], with an optional head-pose gate.
+ *
+ * Every *defining* ("signature") muscle of the captured expression — the
+ * blendshapes that moved most vs neutral — must be activated to roughly
+ * STRENGTH_FRAC of its captured level; the score is the weakest of those. This is
+ * what makes it discriminate: an "open mouth" is defined by jawOpen, so a closed
+ * smile (no jawOpen) can't match it, while a *softer* version of the right
+ * expression still does (intensity-invariant). Everything is relative to the
+ * user's own neutral, so lighting/face-shape differences fall out.
  */
 export function expressionScore(
 	face: FaceData,
@@ -52,17 +49,31 @@ export function expressionScore(
 ): number {
 	const cur = faceVector(face);
 	const n = neutral ?? [];
-	const liveDelta = cur.map((v, i) => Math.max(0, v - (n[i] ?? 0)));
-	const targetDelta = target.map((v, i) => Math.max(0, v - (n[i] ?? 0)));
-	const targetMag = norm(targetDelta);
+	const liveDelta: number[] = [];
+	const targetDelta: number[] = [];
+	let maxT = 0;
+	for (let i = 0; i < target.length; i++) {
+		liveDelta.push(Math.max(0, (cur[i] ?? 0) - (n[i] ?? 0)));
+		const t = Math.max(0, target[i] - (n[i] ?? 0));
+		targetDelta.push(t);
+		if (t > maxT) maxT = t;
+	}
+	const hasExpression = maxT >= EXPR_FLOOR;
 
 	let exprScore: number;
-	if (targetMag < EXPR_FLOOR) {
+	if (!hasExpression) {
 		exprScore = 1; // no real expression captured -> a pure head-pose trigger
 	} else {
-		const liveMag = norm(liveDelta);
-		const strength = clamp01(liveMag / targetMag / STRENGTH_FRAC);
-		exprScore = clamp01(cosine(liveDelta, targetDelta) * strength);
+		const sigCut = Math.max(EXPR_FLOOR, 0.5 * maxT); // a muscle is "defining" if this active
+		let recall = 1;
+		let any = false;
+		for (let i = 0; i < targetDelta.length; i++) {
+			if (targetDelta[i] < sigCut) continue;
+			any = true;
+			const got = clamp01(liveDelta[i] / (STRENGTH_FRAC * targetDelta[i]));
+			if (got < recall) recall = got;
+		}
+		exprScore = any ? recall : 0;
 	}
 
 	if (useHeadPose && headPoseTarget) {
@@ -72,8 +83,8 @@ export function expressionScore(
 	}
 	// A capture with neither a real expression nor a head-pose requirement matches
 	// any face — reject it rather than fire constantly.
-	if (targetMag < EXPR_FLOOR) return 0;
-	return exprScore;
+	if (!hasExpression) return 0;
+	return clamp01(exprScore);
 }
 
 /**
@@ -113,6 +124,39 @@ export function bestCosine(cur: number[], samples: number[][]): number {
 	for (const s of samples) {
 		const c = cosine(cur, s);
 		if (c > best) best = c;
+	}
+	return best;
+}
+
+/** Root-mean-square per-coordinate deviation between two equal-length vectors. */
+export function rmsd(a: number[], b: number[]): number {
+	const n = Math.min(a.length, b.length);
+	if (n === 0) return Infinity;
+	let ss = 0;
+	for (let i = 0; i < n; i++) {
+		const d = a[i] - b[i];
+		ss += d * d;
+	}
+	return Math.sqrt(ss / n);
+}
+
+// Maps RMSD (on unit-RMS-normalised pose / pairwise-descriptor vectors) to a
+// [0,1] score. Tuned so a near-identical pose scores ~1 while a clearly different
+// hand shape (e.g. a point vs an open palm) drops well below typical thresholds.
+const POSE_DIST_SCALE = 1.25;
+
+/**
+ * Best pose-match score over captured samples, using per-point distance rather
+ * than cosine. Cosine is dominated by the points farthest from the hand centroid
+ * (wrist, extended fingers), so folded fingers — exactly what distinguishes a
+ * "point" from an open palm — barely register. RMSD weights every landmark
+ * equally, so finger configuration actually discriminates.
+ */
+export function bestPoseScore(cur: number[], samples: number[][]): number {
+	let best = 0;
+	for (const s of samples) {
+		const score = clamp01(1 - rmsd(cur, s) / POSE_DIST_SCALE);
+		if (score > best) best = score;
 	}
 	return best;
 }

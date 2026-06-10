@@ -77,6 +77,32 @@ assert(scoreTrigger(fixedTrig, { tsMs: 0, face: null, hands: [rotated] }) < scor
 const customHand = mkTrigger({ modality: 'hand', kind: 'custom', motion: 'static', hands: 1, samples: [normalizeStaticPose([h1])], threshold: 0.9 });
 assert(scoreTrigger(customHand, { tsMs: 0, face: null, hands: [h1moved] }) > 0.99, 'custom 1-hand pose matches the same pose moved/scaled');
 
+// --- pose discrimination: a "point" must NOT match an open palm (real bug) ---
+// 21 MediaPipe landmarks: 0 wrist, thumb 1-4, index 5-8, middle 9-12, ring 13-16, pinky 17-20.
+function handFrom(pts: number[][]): HandData {
+	return { handedness: 'Right', gesture: null, landmarks: pts.map((p) => ({ x: p[0], y: p[1], z: p[2] ?? 0, visibility: 1 })) };
+}
+const PALM = handFrom([
+	[0.5, 0.95, 0], [0.42, 0.88, 0], [0.36, 0.82, 0], [0.31, 0.77, 0], [0.27, 0.73, 0],
+	[0.46, 0.72, 0], [0.45, 0.58, 0], [0.44, 0.48, 0], [0.43, 0.4, 0],
+	[0.51, 0.7, 0], [0.51, 0.55, 0], [0.51, 0.44, 0], [0.51, 0.35, 0],
+	[0.56, 0.71, 0], [0.57, 0.57, 0], [0.58, 0.47, 0], [0.59, 0.39, 0],
+	[0.61, 0.74, 0], [0.63, 0.62, 0], [0.64, 0.54, 0], [0.65, 0.48, 0]
+]);
+const POINT = handFrom([
+	[0.5, 0.95, 0], [0.42, 0.88, 0], [0.36, 0.82, 0], [0.31, 0.77, 0], [0.27, 0.73, 0],
+	[0.46, 0.72, 0], [0.45, 0.58, 0], [0.44, 0.48, 0], [0.43, 0.4, 0],
+	[0.51, 0.7, 0], [0.51, 0.58, 0], [0.51, 0.66, 0], [0.51, 0.71, 0],
+	[0.56, 0.71, 0], [0.57, 0.6, 0], [0.57, 0.66, 0], [0.56, 0.71, 0],
+	[0.61, 0.74, 0], [0.62, 0.63, 0], [0.62, 0.69, 0], [0.61, 0.73, 0]
+]);
+const pointTrig = mkTrigger({ modality: 'hand', kind: 'custom', motion: 'static', hands: 1, samples: [normalizeStaticPose([POINT])], threshold: 0.9 });
+const pointSelf = scoreTrigger(pointTrig, { tsMs: 0, face: null, hands: [POINT] });
+const pointVsPalm = scoreTrigger(pointTrig, { tsMs: 0, face: null, hands: [PALM] });
+console.log('  [pose] point-vs-point=' + pointSelf.toFixed(3) + ' point-vs-palm=' + pointVsPalm.toFixed(3));
+assert(pointSelf > 0.95, 'point pose matches itself');
+assert(pointVsPalm < 0.8, 'point pose scores well below threshold for an open palm (was >0.9 with cosine)');
+
 // --- orderHands ---
 function handWith(handedness: string, tf: [number, number, number]): HandData {
 	return { handedness, gesture: null, landmarks: handPts(tf[0], tf[1], tf[2]) };
@@ -128,6 +154,15 @@ assert(expressionScore(faceData({ mouthFrownLeft: 0.8, mouthFrownRight: 0.8 }), 
 const smileTrig = mkTrigger({ modality: 'face', kind: 'custom', target: smileTarget, neutral, threshold: 0.6 });
 assert(scoreTrigger(smileTrig, frameFace(bigSmile)) > 0.9, 'face trigger matches the captured expression');
 assert(scoreTrigger(smileTrig, frameFace(neutralBs)) < 0.6, 'face trigger does not fire on the resting face');
+
+// open mouth must NOT fire on a closed smile (real bug) — jawOpen is the signature
+const openTarget = faceVector(faceData({ jawOpen: 0.85, mouthFunnel: 0.35 }));
+const openTrig = mkTrigger({ modality: 'face', kind: 'custom', target: openTarget, neutral, threshold: 0.55 });
+assert(scoreTrigger(openTrig, frameFace({ jawOpen: 0.8, mouthFunnel: 0.3 })) > 0.85, 'open mouth matches an open mouth');
+assert(
+	scoreTrigger(openTrig, frameFace({ mouthSmileLeft: 0.85, mouthSmileRight: 0.85, cheekSquintLeft: 0.4, cheekSquintRight: 0.4, jawOpen: 0.12 })) < 0.5,
+	'open mouth does NOT fire on a closed smile'
+);
 
 // --- head pose toggle ---
 const poseFwd: HeadPose = { yaw: 2, pitch: 5, roll: 0 };

@@ -41,9 +41,11 @@ export function createGestureRecognizer(vision: Vision, delegate: Delegate): Pro
 		baseOptions: { modelAssetPath: HAND_MODEL, delegate },
 		runningMode: 'VIDEO',
 		numHands: 2,
-		minHandDetectionConfidence: 0.3,
-		minHandPresenceConfidence: 0.3,
-		minTrackingConfidence: 0.3
+		// Looser still: easier to acquire a hand, and stickier tracking so it
+		// doesn't drop while clearly in frame.
+		minHandDetectionConfidence: 0.2,
+		minHandPresenceConfidence: 0.2,
+		minTrackingConfidence: 0.2
 	});
 }
 

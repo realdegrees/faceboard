@@ -54,12 +54,6 @@ export interface Trigger {
 	/** 'once' = play the sound once on fire. 'while-active' = start the sound when
 	 *  the trigger goes active and stop it when it ends (looping). Default 'once'. */
 	playback?: 'once' | 'while-active';
-	/** Must be detected this many times in a row to fire (default 1). Each "try" is
-	 *  a full detection (hold included), and consecutive tries must fall within
-	 *  `repeatGraceMs` of each other or the count resets. */
-	repeatCount?: number;
-	/** Max gap (ms) between consecutive detections for the repeat counter. */
-	repeatGraceMs?: number;
 	/** Linked sound id, or null if unlinked. */
 	soundId: string | null;
 	enabled: boolean;

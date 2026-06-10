@@ -3,6 +3,7 @@ import type { DetectionFrame } from '../detection/types';
 import { getPreset } from './presets';
 import {
 	bestCosine,
+	bestPoseScore,
 	expressionScore,
 	faceVector,
 	mirrorX,
@@ -91,7 +92,7 @@ function scoreCustom(trigger: Trigger, frame: DetectionFrame): number {
 		}
 	}
 	let best = 0;
-	for (const c of candidates) best = Math.max(best, bestCosine(feat(c), refs));
+	for (const c of candidates) best = Math.max(best, bestPoseScore(feat(c), refs));
 	return clampScore(best);
 }
 

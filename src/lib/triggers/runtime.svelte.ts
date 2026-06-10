@@ -21,10 +21,6 @@ interface TriggerRunState {
 	armed: boolean;
 	/** When the pose dropped below the release threshold (null while detected). */
 	releasedSince: number | null;
-	/** Consecutive detections accumulated toward repeatCount. */
-	repeatHits: number;
-	/** Timestamp of the last detection (for the repeat grace window). */
-	lastHit: number;
 	/** 'while-active' (gate) playback is currently sounding for this trigger. */
 	gateOn: boolean;
 }
@@ -123,7 +119,7 @@ class TriggerRuntime {
 				if (st.armed && ts - st.holdStart >= t.holdMs) {
 					st.lastFired = ts;
 					st.armed = false;
-					this.#onDetection(t, ts);
+					this.#onDetection(t);
 				}
 			} else {
 				// Pose no longer active — end any gated ('while-active') playback.
@@ -223,7 +219,7 @@ class TriggerRuntime {
 				const st = this.#stateFor(t.id);
 				if (end - st.lastFired >= Math.max(t.cooldownMs, 500)) {
 					st.lastFired = end;
-					this.#onDetection(t, end);
+					this.#onDetection(t);
 				}
 			}
 		}
@@ -239,20 +235,9 @@ class TriggerRuntime {
 		return frames;
 	}
 
-	/** A confirmed detection edge. Applies the repeat-N-times-in-a-row gate, then
-	 *  activates (fires once, or starts gated playback). */
-	#onDetection(t: Trigger, ts: number): void {
-		const st = this.#stateFor(t.id);
-		const repeat = Math.max(1, Math.round(t.repeatCount ?? 1));
-		if (repeat > 1) {
-			const grace = t.repeatGraceMs ?? 1500;
-			if (ts - st.lastHit > grace) st.repeatHits = 0; // grace expired — start over
-			st.repeatHits++;
-			st.lastHit = ts;
-			if (st.repeatHits < repeat) return; // not enough consecutive detections yet
-			st.repeatHits = 0;
-		}
-		this.#activate(t, st);
+	/** A confirmed detection edge — activate (fire once, or start gated playback). */
+	#onDetection(t: Trigger): void {
+		this.#activate(t, this.#stateFor(t.id));
 	}
 
 	#activate(t: Trigger, st: TriggerRunState): void {
@@ -296,15 +281,7 @@ class TriggerRuntime {
 	#stateFor(id: string): TriggerRunState {
 		let st = this.#runState.get(id);
 		if (!st) {
-			st = {
-				holdStart: null,
-				lastFired: -Infinity,
-				armed: true,
-				releasedSince: null,
-				repeatHits: 0,
-				lastHit: -Infinity,
-				gateOn: false
-			};
+			st = { holdStart: null, lastFired: -Infinity, armed: true, releasedSince: null, gateOn: false };
 			this.#runState.set(id, st);
 		}
 		return st;

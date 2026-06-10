@@ -30,11 +30,6 @@
 			playback: (e.target as HTMLSelectElement).value as 'once' | 'while-active'
 		});
 	}
-	function setRepeat(e: Event) {
-		app.updateTrigger(trigger.id, {
-			repeatCount: Math.max(1, Math.round(+(e.target as HTMLInputElement).value || 1))
-		});
-	}
 	function setHeadPose(e: Event) {
 		app.updateTrigger(trigger.id, { useHeadPose: (e.target as HTMLSelectElement).value === 'on' });
 	}
@@ -270,16 +265,5 @@
 			</select>
 		</label>
 
-		<label class="flex flex-col gap-1">
-			<span class="text-[11px] text-faint">Repeat ×</span>
-			<input
-				type="number"
-				min="1"
-				step="1"
-				value={trigger.repeatCount ?? 1}
-				oninput={setRepeat}
-				class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] outline-none focus:border-border-strong"
-			/>
-		</label>
 	</div>
 </div>
