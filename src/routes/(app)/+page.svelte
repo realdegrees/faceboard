@@ -54,6 +54,10 @@
 		await engine.openCamera(val || null); // swaps preview; resumes detection if it was on
 	}
 
+	// MediaPipe's "GPU" delegate silently falls back to a software rasterizer on
+	// some machines, which is the usual cause of single-digit fps.
+	const softwareGl = $derived(/swiftshader|llvmpipe|software/i.test(engine.glRenderer));
+
 	const statusLabel = $derived(
 		engine.detecting
 			? `Live · ${engine.fps} fps · ${engine.delegate}`
@@ -130,9 +134,17 @@
 								? 'bg-red-500'
 								: 'bg-faint'}"
 					></span>
-					<span class="text-muted">{statusLabel}</span>
+					<span class="text-muted" title={engine.glRenderer}>{statusLabel}</span>
 					{#if engine.active}
 						<span class="text-faint">· {app.settings.triggers.length} triggers</span>
+					{/if}
+					{#if engine.active && softwareGl}
+						<span
+							class="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-300"
+							title="MediaPipe is running on a software renderer ({engine.glRenderer}) instead of the GPU — this is why detection is slow. Enable hardware acceleration / GPU drivers."
+						>
+							software GPU — slow
+						</span>
 					{/if}
 				</div>
 				{#if showCameraControls}

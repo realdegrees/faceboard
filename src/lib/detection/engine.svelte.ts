@@ -14,6 +14,22 @@ export interface CameraDevice {
 	label: string;
 }
 
+/** Unmasked WebGL renderer string — reveals whether we're on a real GPU or a
+ *  software rasterizer (SwiftShader / llvmpipe), which is the usual cause of a
+ *  ~5fps inference cliff even though the delegate still reports "GPU". */
+function detectGlRenderer(): string {
+	try {
+		const c = document.createElement('canvas');
+		const gl = (c.getContext('webgl2') ?? c.getContext('webgl')) as WebGLRenderingContext | null;
+		if (!gl) return 'no-webgl';
+		const ext = gl.getExtension('WEBGL_debug_renderer_info');
+		const r = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+		return typeof r === 'string' ? r : 'unknown';
+	} catch {
+		return 'unknown';
+	}
+}
+
 /** Friendlier message for common getUserMedia failures. */
 function cameraError(err: unknown): string {
 	const name = (err as { name?: string } | null)?.name;
@@ -55,17 +71,19 @@ class DetectionEngine {
 	hands = $state.raw<HandData[]>([]);
 	devices = $state<CameraDevice[]>([]);
 	stream = $state<MediaStream | null>(null);
-	targetFps = $state(18);
+	targetFps = $state(30);
 	modalities = $state<ModalityFlags>({ face: true, hand: true });
 	/** Whether the active stream is the local webcam or a paired phone. */
 	source = $state<'local' | 'phone'>('local');
-	/** Adaptive low-light boost on the detection input. */
-	enhance = $state(true);
 	/** Display + detection rotation in degrees (0/90/180/270) for sideways feeds. */
 	rotation = $state(0);
 	/** Which MediaPipe delegate ended up active (GPU is ~10× faster than the CPU
 	 *  fallback). Surfaced so a slow CPU fallback is visible, not silent. */
 	delegate = $state<'GPU' | 'CPU'>('GPU');
+	/** Unmasked WebGL renderer. If this contains "SwiftShader"/"llvmpipe" the GPU
+	 *  delegate is actually running on a software rasterizer (the real cause of a
+	 *  ~5fps cliff) — surfaced so that's diagnosable, not silent. */
+	glRenderer = $state('');
 
 	/** Hook for the matching engine. */
 	onFrame: ((frame: DetectionFrame) => void) | null = null;
@@ -77,15 +95,9 @@ class DetectionEngine {
 	#lastTs = 0;
 	#frameCount = 0;
 	#fpsWindowStart = 0;
-	/** Alternates face/hand inference across ticks when both are enabled. */
-	#parity = false;
 
-	// Low-light preprocessing
+	// Canvas reused only to rotate sideways (phone) feeds before inference.
 	#procCanvas: HTMLCanvasElement | null = null;
-	#sampleCanvas: HTMLCanvasElement | null = null;
-	#brightness = 1;
-	#contrast = 1;
-	#sampleTick = 0;
 
 	/** Back-compat: "active" means detection is running. */
 	get active(): boolean {
@@ -116,8 +128,13 @@ class DetectionEngine {
 		this.status = 'loading';
 		this.error = null;
 		try {
+			// Cap the source at 720p: plenty for face+hand landmarks and a clean
+			// preview, but bounds the per-frame GPU texture upload so a 1080p/4K
+			// webcam doesn't tank inference. The video element is fed to MediaPipe
+			// directly, so the capture resolution IS the inference resolution.
+			const res = { width: { ideal: 1280 }, height: { ideal: 720 } };
 			const stream = await navigator.mediaDevices.getUserMedia({
-				video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'user' },
+				video: deviceId ? { deviceId: { exact: deviceId }, ...res } : { facingMode: 'user', ...res },
 				audio: false
 			});
 			this.#external = false;
@@ -143,6 +160,10 @@ class DetectionEngine {
 		try {
 			await this.#detector.init(this.modalities);
 			this.delegate = this.#detector.delegate;
+			if (!this.glRenderer) {
+				this.glRenderer = detectGlRenderer();
+				console.info(`[faceboard] detection delegate=${this.delegate} renderer=${this.glRenderer}`);
+			}
 			this.detecting = true;
 			this.#startLoop();
 			this.status = 'idle';
@@ -169,6 +190,10 @@ class DetectionEngine {
 		try {
 			await this.#detector.init(this.modalities);
 			this.delegate = this.#detector.delegate;
+			if (!this.glRenderer) {
+				this.glRenderer = detectGlRenderer();
+				console.info(`[faceboard] detection delegate=${this.delegate} renderer=${this.glRenderer}`);
+			}
 			this.#external = true;
 			this.source = 'phone';
 			await this.#useStream(stream);
@@ -221,12 +246,7 @@ class DetectionEngine {
 		this.#stopLoop();
 		this.#fpsWindowStart = performance.now();
 		this.#frameCount = 0;
-		this.#scheduleTick();
-	}
-
-	#scheduleTick(): void {
-		const interval = Math.max(1000 / this.targetFps, 8);
-		this.#timer = setTimeout(() => this.#tick(), interval);
+		this.#timer = setTimeout(() => this.#tick(), 0);
 	}
 
 	#stopLoop(): void {
@@ -234,46 +254,44 @@ class DetectionEngine {
 		this.#timer = null;
 	}
 
-	// Self-pacing: each tick schedules the next only AFTER its (synchronous,
-	// variable-cost) MediaPipe inference finishes. MediaPipe's recognizeForVideo is
-	// far heavier once a hand is actually tracked; a fixed-rate setInterval would
-	// queue those slow ticks back-to-back and starve rendering. This guarantees the
-	// UI gets `interval` ms to breathe between ticks — fps drops gracefully under
-	// load instead of the whole app freezing.
+	/**
+	 * One detection per tick: both detectors run on the SAME frame so the face mesh
+	 * and hand skeleton are always in sync. The raw <video> element is handed
+	 * straight to MediaPipe (no intermediate 2D canvas / CSS filter) so the GPU
+	 * delegate can upload the video texture directly — the canonical fast path; a
+	 * filtered canvas both adds main-thread work and defeats that upload.
+	 *
+	 * Self-pacing: the next tick is scheduled AFTER this one finishes, aiming for
+	 * the target frame period but always yielding a little to the UI. So when
+	 * inference is cheap (GPU) we hit ~targetFps, and when it's expensive (CPU
+	 * fallback) fps degrades gracefully instead of the main thread saturating.
+	 */
 	#tick(): void {
 		this.#timer = null;
+		const start = performance.now();
 		try {
 			const v = this.#video;
 			if (!v || v.readyState < 2) return;
 			// MediaPipe requires strictly increasing timestamps per detector.
-			const ts = Math.max(performance.now(), this.#lastTs + 1);
+			const ts = Math.max(start, this.#lastTs + 1);
 			this.#lastTs = ts;
 
-			// Always route through the canvas so the frame is downscaled (and rotated
-			// / brightened when enabled) before the expensive inference.
-			const input = this.#preprocess(v);
+			// Only fall back to a canvas to physically rotate a sideways (phone) feed;
+			// otherwise feed the video element itself.
+			const rotated = ((this.rotation % 360) + 360) % 360 !== 0;
+			const input = rotated ? this.#rotateToCanvas(v) : v;
 
-			// When both detectors are on, run only one per tick — each MediaPipe call
-			// is synchronous and blocks the main thread, so halving the per-tick work
-			// keeps the UI responsive. Each modality updates at ~half the loop rate;
-			// the other's last result carries over so per-frame matching stays
-			// continuous (no flapping to 0 on the off-ticks).
-			let mods = this.modalities;
-			if (mods.face && mods.hand) {
-				mods = this.#parity ? { face: false, hand: true } : { face: true, hand: false };
-				this.#parity = !this.#parity;
-			}
 			let frame: DetectionFrame;
 			try {
-				frame = this.#detector.detect(input, ts, mods);
+				frame = this.#detector.detect(input, ts, this.modalities);
 			} catch (err) {
 				this.error = err instanceof Error ? err.message : String(err);
 				return;
 			}
 
-			if (mods.face) this.face = frame.face;
-			if (mods.hand) this.hands = frame.hands;
-			this.onFrame?.({ tsMs: ts, face: this.face, hands: this.hands });
+			this.face = frame.face;
+			this.hands = frame.hands;
+			this.onFrame?.(frame);
 
 			this.#frameCount++;
 			const elapsed = ts - this.#fpsWindowStart;
@@ -283,13 +301,19 @@ class DetectionEngine {
 				this.#fpsWindowStart = ts;
 			}
 		} finally {
-			if (this.detecting) this.#scheduleTick();
+			if (this.detecting) {
+				const period = Math.max(1000 / this.targetFps, 8);
+				const used = performance.now() - start;
+				// Aim for the target period; always leave a small gap so rendering and
+				// input get a turn even when inference eats most of the budget.
+				this.#timer = setTimeout(() => this.#tick(), Math.max(6, period - used));
+			}
 		}
 	}
 
-	/** Draw the frame to an offscreen canvas with an adaptive brightness/contrast
-	 * boost so the detector sees a clearer image in low light. */
-	#preprocess(video: HTMLVideoElement): HTMLCanvasElement {
+	/** Rotate a sideways feed into an offscreen canvas (downscaled) for detection.
+	 *  Landmarks come back normalized in this rotated frame, matching the preview. */
+	#rotateToCanvas(video: HTMLVideoElement): HTMLCanvasElement {
 		const r = ((this.rotation % 360) + 360) % 360;
 		const swap = r === 90 || r === 270;
 		const vw = video.videoWidth || 640;
@@ -304,39 +328,12 @@ class DetectionEngine {
 		if (canvas.height !== ch) canvas.height = ch;
 		const ctx = canvas.getContext('2d');
 		if (!ctx) return canvas;
-		if (this.enhance && this.#sampleTick++ % 12 === 0) this.#adaptExposure(video);
 		ctx.save();
-		ctx.filter = this.enhance
-			? `brightness(${this.#brightness.toFixed(2)}) contrast(${this.#contrast.toFixed(2)}) saturate(1.04)`
-			: 'none';
 		ctx.translate(cw / 2, ch / 2);
-		if (r) ctx.rotate((r * Math.PI) / 180);
+		ctx.rotate((r * Math.PI) / 180);
 		ctx.drawImage(video, -fw / 2, -fh / 2, fw, fh);
 		ctx.restore();
 		return canvas;
-	}
-
-	#adaptExposure(video: HTMLVideoElement): void {
-		const s = (this.#sampleCanvas ??= document.createElement('canvas'));
-		s.width = 24;
-		s.height = 24;
-		const ctx = s.getContext('2d', { willReadFrequently: true });
-		if (!ctx) return;
-		try {
-			ctx.drawImage(video, 0, 0, 24, 24);
-			const data = ctx.getImageData(0, 0, 24, 24).data;
-			let sum = 0;
-			for (let i = 0; i < data.length; i += 4) {
-				sum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-			}
-			const meanLuma = sum / (data.length / 4) / 255;
-			const desired = meanLuma > 0.001 ? 0.5 / meanLuma : 1;
-			const clamped = Math.max(1, Math.min(2.3, desired));
-			this.#brightness += (clamped - this.#brightness) * 0.4;
-			this.#contrast = 1 + (this.#brightness - 1) * 0.35;
-		} catch {
-			/* not ready — skip */
-		}
 	}
 
 	#teardownStream(): void {

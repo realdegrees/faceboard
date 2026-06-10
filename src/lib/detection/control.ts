@@ -9,7 +9,6 @@ import { engine } from './engine.svelte';
  */
 export async function startDetection(): Promise<void> {
 	engine.targetFps = app.settings.general.detectionFps;
-	engine.enhance = app.settings.general.enhanceLowLight;
 	// Always run both detectors for the live preview — the dashboard shows the face
 	// mesh + hand skeleton regardless of which triggers exist, so the mesh must not
 	// be gated on having a face trigger configured.
