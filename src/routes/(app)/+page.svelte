@@ -93,6 +93,21 @@
 		</button>
 	</header>
 
+	{#if engine.active && softwareGl}
+		<div class="mb-4 rounded-card border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-[13px]">
+			<p class="font-medium text-amber-300">Detection is running on a software renderer — that's the slowness.</p>
+			<p class="mt-1 text-amber-200/80">
+				MediaPipe couldn't use your GPU and fell back to a software rasterizer (<span class="font-mono text-[12px]">{engine.glRenderer || 'unknown'}</span>),
+				which caps inference to a few fps no matter what the app does. To fix it on this machine:
+			</p>
+			<ul class="mt-1.5 list-disc space-y-0.5 pl-5 text-amber-200/80">
+				<li>Run the installed desktop app, not a <span class="font-mono text-[12px]">dev</span> build under WSL2 (WSL2 has no GPU).</li>
+				<li>Enable hardware acceleration / update your GPU drivers on the host.</li>
+				<li>The UI stays smooth either way now (inference is off the main thread); only the detection rate is limited.</li>
+			</ul>
+		</div>
+	{/if}
+
 	<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
 		<!-- Camera -->
 		<div class="lg:col-span-2 rounded-card border border-border bg-surface-1 p-4">
@@ -140,14 +155,6 @@
 					>{statusLabel}</span>
 					{#if engine.active}
 						<span class="text-faint">· {app.settings.triggers.length} triggers</span>
-					{/if}
-					{#if engine.active && softwareGl}
-						<span
-							class="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-300"
-							title="MediaPipe is running on a software renderer ({engine.glRenderer}) instead of the GPU — this is why detection is slow. Enable hardware acceleration / GPU drivers."
-						>
-							software GPU — slow
-						</span>
 					{/if}
 				</div>
 				{#if showCameraControls}
