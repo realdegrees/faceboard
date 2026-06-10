@@ -54,6 +54,8 @@ export interface Trigger {
 	/** 'once' = play the sound once on fire. 'while-active' = start the sound when
 	 *  the trigger goes active and stop it when it ends (looping). Default 'once'. */
 	playback?: 'once' | 'while-active';
+	/** Playback volume in [0,1] for this trigger's sound (default 1). */
+	volume?: number;
 	/** Linked sound id, or null if unlinked. */
 	soundId: string | null;
 	enabled: boolean;
@@ -65,8 +67,6 @@ export interface Sound {
 	label: string;
 	/** Absolute path on disk. */
 	path: string;
-	/** Playback volume in [0,1]. */
-	volume: number;
 	createdAt: number;
 }
 

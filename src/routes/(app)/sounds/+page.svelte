@@ -13,7 +13,7 @@
 		if (!bridge) return;
 		const files = await bridge.sounds.openDialog();
 		for (const f of files) {
-			const sound = { id: newId(), label: f.name, path: f.path, volume: 0.8, createdAt: Date.now() };
+			const sound = { id: newId(), label: f.name, path: f.path, createdAt: Date.now() };
 			app.addSound(sound);
 			void soundPlayer.load(sound.id, sound.path);
 		}
@@ -91,19 +91,6 @@
 							{linkedCount(sound.id)} linked
 						</span>
 					{/if}
-
-					<div class="flex w-32 shrink-0 items-center gap-2">
-						<svg width="14" height="14" viewBox="0 0 24 24" class="text-faint" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z" /><path d="M16 9a4 4 0 0 1 0 6" /></svg>
-						<input
-							type="range"
-							min="0"
-							max="1"
-							step="0.01"
-							value={sound.volume}
-							oninput={(e) => app.updateSound(sound.id, { volume: +(e.target as HTMLInputElement).value })}
-							class="fb-range flex-1"
-						/>
-					</div>
 
 					<button
 						onclick={() => remove(sound.id)}

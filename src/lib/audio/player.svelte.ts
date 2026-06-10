@@ -61,7 +61,7 @@ class SoundPlayer {
 		const src = ctx.createBufferSource();
 		src.buffer = buffer;
 		const gain = ctx.createGain();
-		gain.gain.value = volumeOverride ?? sound.volume ?? 1;
+		gain.gain.value = volumeOverride ?? 1;
 		src.connect(gain).connect(ctx.destination);
 		src.start();
 
@@ -87,7 +87,7 @@ class SoundPlayer {
 		src.buffer = buffer;
 		src.loop = true;
 		const gain = ctx.createGain();
-		gain.gain.value = volumeOverride ?? sound.volume ?? 1;
+		gain.gain.value = volumeOverride ?? 1;
 		src.connect(gain).connect(ctx.destination);
 		src.start();
 		this.#gates.set(soundId, src);

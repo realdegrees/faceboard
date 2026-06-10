@@ -33,6 +33,9 @@
 	function setHeadPose(e: Event) {
 		app.updateTrigger(trigger.id, { useHeadPose: (e.target as HTMLSelectElement).value === 'on' });
 	}
+	function setVolume(e: Event) {
+		app.updateTrigger(trigger.id, { volume: +(e.target as HTMLInputElement).value });
+	}
 
 	function setThreshold(e: Event) {
 		app.updateTrigger(trigger.id, { threshold: +(e.target as HTMLInputElement).value });
@@ -156,6 +159,19 @@
 				{/each}
 				<option value="__add">＋ Add a sound…</option>
 			</select>
+		</label>
+
+		<label class="col-span-2 flex flex-col gap-1 sm:col-span-1">
+			<span class="text-[11px] text-faint">Volume · {Math.round((trigger.volume ?? 1) * 100)}%</span>
+			<input
+				type="range"
+				min="0"
+				max="1"
+				step="0.01"
+				value={trigger.volume ?? 1}
+				oninput={setVolume}
+				class="fb-range mt-1.5"
+			/>
 		</label>
 
 		<label class="col-span-2 flex flex-col gap-1 sm:col-span-1">

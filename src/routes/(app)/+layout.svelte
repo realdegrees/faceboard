@@ -18,11 +18,11 @@
 	onMount(() => {
 		runtime.init();
 		runtime.onFire = (trigger) => {
-			if (trigger.soundId) void soundPlayer.play(trigger.soundId);
+			if (trigger.soundId) void soundPlayer.play(trigger.soundId, trigger.volume ?? 1);
 		};
 		// 'while-active' (gate) triggers: loop the sound while active, stop on release.
 		runtime.onGateStart = (trigger) => {
-			if (trigger.soundId) void soundPlayer.startGate(trigger.soundId);
+			if (trigger.soundId) void soundPlayer.startGate(trigger.soundId, trigger.volume ?? 1);
 		};
 		runtime.onGateStop = (trigger) => {
 			if (trigger.soundId) soundPlayer.stopGate(trigger.soundId);
