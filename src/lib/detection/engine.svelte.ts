@@ -3,6 +3,12 @@ import type { DetectionFrame, FaceData, HandData } from './types';
 
 export type EngineStatus = 'idle' | 'loading' | 'error';
 
+// Cap the long side of the frame fed to MediaPipe. Inference + GPU-upload cost
+// scales with input size and the models resize to a small internal resolution
+// anyway, so a full-res webcam frame is wasted work. Landmarks are normalized
+// [0,1], so downscaling the detector input doesn't shift the preview overlay.
+const DETECT_MAX_DIM = 480;
+
 export interface CameraDevice {
 	deviceId: string;
 	label: string;
@@ -57,6 +63,9 @@ class DetectionEngine {
 	enhance = $state(true);
 	/** Display + detection rotation in degrees (0/90/180/270) for sideways feeds. */
 	rotation = $state(0);
+	/** Which MediaPipe delegate ended up active (GPU is ~10× faster than the CPU
+	 *  fallback). Surfaced so a slow CPU fallback is visible, not silent. */
+	delegate = $state<'GPU' | 'CPU'>('GPU');
 
 	/** Hook for the matching engine. */
 	onFrame: ((frame: DetectionFrame) => void) | null = null;
@@ -68,6 +77,8 @@ class DetectionEngine {
 	#lastTs = 0;
 	#frameCount = 0;
 	#fpsWindowStart = 0;
+	/** Alternates face/hand inference across ticks when both are enabled. */
+	#parity = false;
 
 	// Low-light preprocessing
 	#procCanvas: HTMLCanvasElement | null = null;
@@ -131,6 +142,7 @@ class DetectionEngine {
 		this.status = 'loading';
 		try {
 			await this.#detector.init(this.modalities);
+			this.delegate = this.#detector.delegate;
 			this.detecting = true;
 			this.#startLoop();
 			this.status = 'idle';
@@ -156,6 +168,7 @@ class DetectionEngine {
 		this.error = null;
 		try {
 			await this.#detector.init(this.modalities);
+			this.delegate = this.#detector.delegate;
 			this.#external = true;
 			this.source = 'phone';
 			await this.#useStream(stream);
@@ -236,18 +249,31 @@ class DetectionEngine {
 			const ts = Math.max(performance.now(), this.#lastTs + 1);
 			this.#lastTs = ts;
 
-			const input = this.enhance || this.rotation ? this.#preprocess(v) : v;
+			// Always route through the canvas so the frame is downscaled (and rotated
+			// / brightened when enabled) before the expensive inference.
+			const input = this.#preprocess(v);
+
+			// When both detectors are on, run only one per tick — each MediaPipe call
+			// is synchronous and blocks the main thread, so halving the per-tick work
+			// keeps the UI responsive. Each modality updates at ~half the loop rate;
+			// the other's last result carries over so per-frame matching stays
+			// continuous (no flapping to 0 on the off-ticks).
+			let mods = this.modalities;
+			if (mods.face && mods.hand) {
+				mods = this.#parity ? { face: false, hand: true } : { face: true, hand: false };
+				this.#parity = !this.#parity;
+			}
 			let frame: DetectionFrame;
 			try {
-				frame = this.#detector.detect(input, ts, this.modalities);
+				frame = this.#detector.detect(input, ts, mods);
 			} catch (err) {
 				this.error = err instanceof Error ? err.message : String(err);
 				return;
 			}
 
-			this.face = frame.face;
-			this.hands = frame.hands;
-			this.onFrame?.(frame);
+			if (mods.face) this.face = frame.face;
+			if (mods.hand) this.hands = frame.hands;
+			this.onFrame?.({ tsMs: ts, face: this.face, hands: this.hands });
 
 			this.#frameCount++;
 			const elapsed = ts - this.#fpsWindowStart;
@@ -266,8 +292,11 @@ class DetectionEngine {
 	#preprocess(video: HTMLVideoElement): HTMLCanvasElement {
 		const r = ((this.rotation % 360) + 360) % 360;
 		const swap = r === 90 || r === 270;
-		const fw = video.videoWidth || 640;
-		const fh = video.videoHeight || 480;
+		const vw = video.videoWidth || 640;
+		const vh = video.videoHeight || 480;
+		const scale = Math.min(1, DETECT_MAX_DIM / Math.max(vw, vh));
+		const fw = Math.round(vw * scale);
+		const fh = Math.round(vh * scale);
 		const cw = swap ? fh : fw;
 		const ch = swap ? fw : fh;
 		const canvas = (this.#procCanvas ??= document.createElement('canvas'));

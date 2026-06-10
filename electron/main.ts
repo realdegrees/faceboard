@@ -10,6 +10,12 @@ import { createTray, setTrayDetection } from './tray';
 // prior user gesture.
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
+// MediaPipe's GPU delegate runs on WebGL. If Chromium blocklists the GPU it
+// silently falls back to software (SwiftShader), which drops inference to
+// CPU-speed (~5fps). For a trusted local app we'd rather use the real GPU even
+// on a blocklisted configuration.
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+
 const isDev = process.env.NODE_ENV === 'development';
 
 // In production the SvelteKit static build is served from a custom app:// scheme.

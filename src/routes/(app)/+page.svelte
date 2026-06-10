@@ -56,7 +56,7 @@
 
 	const statusLabel = $derived(
 		engine.detecting
-			? `Live · ${engine.fps} fps`
+			? `Live · ${engine.fps} fps · ${engine.delegate}`
 			: engine.status === 'loading'
 				? 'Starting…'
 				: engine.status === 'error'
