@@ -273,12 +273,18 @@ class DetectionEngine {
 	/** Create (or re-init for new modalities) the off-thread worker; fall back to
 	 *  the main-thread detector if the worker can't be brought up. */
 	async #ensureDetector(modalities: ModalityFlags): Promise<void> {
-		// Pick the delegate from the WebGL renderer BEFORE creating detectors: on a
-		// software rasterizer (SwiftShader/llvmpipe) MediaPipe's "GPU" delegate runs
-		// the graphs in software and is several times SLOWER than the CPU/XNNPACK
-		// path (measured: ~7fps vs ~25fps for face+hand). On a real GPU, GPU wins.
+		// Decide delegate AND thread from the WebGL renderer, up front:
+		//  • Real GPU → GPU delegate on the MAIN THREAD. Inference is fast there, and
+		//    handing MediaPipe the raw <video> avoids the worker's per-frame GPU→CPU
+		//    readback to transfer each frame — lowest latency, tightest overlay. This
+		//    is the canonical hand-rolled path.
+		//  • Software WebGL (SwiftShader/llvmpipe) → CPU delegate (the "GPU" path is
+		//    software here and ~3.7× slower; measured ~7fps vs ~25fps) in the WORKER,
+		//    so the slow inference doesn't block the UI thread.
 		if (!this.glRenderer) this.glRenderer = detectGlRenderer();
-		const prefer: Delegate = this.softwareGl ? 'CPU' : 'GPU';
+		const sw = this.softwareGl;
+		const prefer: Delegate = sw ? 'CPU' : 'GPU';
+		this.#mode = sw ? 'worker' : 'main';
 
 		if (this.#mode === 'worker') {
 			try {
@@ -291,6 +297,7 @@ class DetectionEngine {
 				this.delegate = this.#detector.delegate;
 			}
 		} else {
+			this.#teardownWorker(); // never leave a worker running in main-thread mode
 			await this.#detector.init(modalities, prefer);
 			this.delegate = this.#detector.delegate;
 		}
@@ -471,8 +478,9 @@ class DetectionEngine {
 	}
 
 	/**
-	 * Main-thread fallback loop (used only when the worker is unavailable). Both
-	 * detectors run on the same frame; the raw <video> goes straight to MediaPipe.
+	 * Main-thread loop — the primary path on a real GPU (and the worker fallback).
+	 * Both detectors run on the same frame and the raw <video> goes straight to
+	 * MediaPipe (no canvas/transfer), so the overlay has the lowest latency.
 	 * Self-paced toward targetFps with a small floor so the UI still gets a turn.
 	 */
 	#tickMain(): void {
