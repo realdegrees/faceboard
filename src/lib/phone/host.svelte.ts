@@ -1,8 +1,6 @@
 import { FaceLandmarker, GestureRecognizer } from '@mediapipe/tasks-vision';
 import { getBridge, type LanInfo } from '$lib/bridge';
 import { engine } from '$lib/detection/engine.svelte';
-import { app } from '$lib/stores/app.svelte';
-import { neededModalities } from '$lib/triggers/runtime.svelte';
 import { Signaling } from './signaling';
 
 // Flattened mesh/skeleton connections sent once to the phone so it can draw the
@@ -78,7 +76,9 @@ class PhoneHost {
 		};
 		pc.ontrack = (e) => {
 			this.state = 'connected';
-			engine.modalities = neededModalities(app.settings.triggers);
+			// Both detectors so the phone overlay shows the mesh + skeleton (and the
+			// desktop preview/readouts stay populated) no matter the trigger set.
+			engine.modalities = { face: true, hand: true };
 			void engine.useExternalStream(e.streams[0]);
 			getBridge()?.detection.notifyState(true);
 		};

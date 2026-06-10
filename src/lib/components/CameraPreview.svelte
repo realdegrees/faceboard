@@ -39,10 +39,16 @@
 		const c = canvasEl;
 		if (!v || !c) return;
 		let raf = 0;
+		let lastDraw = 0;
 		const F = FaceLandmarker;
 
-		const draw = () => {
+		// Cap the preview to ~30fps. Detection runs at ≤18fps and the face
+		// tessellation is ~2600 segments — redrawing it every vsync (60fps) is pure
+		// overhead with no visible benefit.
+		const draw = (now: number) => {
 			raf = requestAnimationFrame(draw);
+			if (now - lastDraw < 32) return;
+			lastDraw = now;
 			if (v.readyState < 2 || !v.videoWidth) return;
 			const r = ((engine.rotation % 360) + 360) % 360;
 			const swap = r === 90 || r === 270;

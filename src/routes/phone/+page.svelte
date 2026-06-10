@@ -14,6 +14,9 @@
 	let selfVideo = $state<HTMLVideoElement>();
 	let overlayCanvas = $state<HTMLCanvasElement>();
 	let aspect = $state(3 / 4);
+	// Collapsed by default to a compact 16:9 strip so the status + controls stay on
+	// screen; tap the preview to expand it to the camera's native aspect.
+	let expanded = $state(false);
 
 	let sig: Signaling | null = null;
 	let pc: RTCPeerConnection | null = null;
@@ -274,8 +277,18 @@
 	</header>
 
 	<div
-		class="relative mx-auto w-full overflow-hidden rounded-xl border border-border bg-surface-2"
-		style="aspect-ratio: {aspect}"
+		onclick={() => (expanded = !expanded)}
+		onkeydown={(e) => {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				expanded = !expanded;
+			}
+		}}
+		class="relative mx-auto w-full cursor-pointer overflow-hidden rounded-xl border border-border bg-surface-2"
+		style="aspect-ratio: {expanded ? aspect : 16 / 9}"
+		role="button"
+		tabindex="0"
+		aria-label={expanded ? 'Collapse camera preview' : 'Expand camera preview'}
 	>
 		<!-- svelte-ignore a11y_media_has_caption -->
 		<video
@@ -289,6 +302,7 @@
 			bind:this={overlayCanvas}
 			class="pointer-events-none absolute inset-0 h-full w-full object-cover {lost ? 'opacity-0' : ''}"
 		></canvas>
+
 		{#if lost}
 			<div class="absolute inset-0 grid place-items-center bg-red-950/40 text-center">
 				<div class="px-6">
@@ -298,6 +312,32 @@
 				</div>
 			</div>
 		{/if}
+
+		<!-- expand/collapse affordance -->
+		<span class="pointer-events-none absolute top-2 left-2 rounded-md bg-black/45 px-2 py-1 text-[11px] text-white/85 backdrop-blur-sm">
+			{expanded ? 'Tap to collapse' : 'Tap to expand'}
+		</span>
+
+		<!-- camera controls embedded bottom-right; stop propagation so they don't
+		     toggle the expand/collapse on the container. -->
+		<div class="absolute right-2 bottom-2 flex items-center gap-2">
+			<button
+				onclick={(e) => { e.stopPropagation(); flip(); }}
+				aria-label="Flip camera"
+				class="flex items-center gap-1.5 rounded-lg bg-black/50 px-2.5 py-1.5 text-[12px] text-white/90 backdrop-blur-sm transition-colors active:bg-black/70"
+			>
+				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M11 19H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3l2-2h4l1 1" /><path d="M14.5 4.5 17 7l2.5-2.5" /><path d="M17 7v4" /><circle cx="11" cy="12" r="3" /></svg>
+				Flip
+			</button>
+			<button
+				onclick={(e) => { e.stopPropagation(); requestRotate(); }}
+				aria-label="Rotate 90 degrees"
+				class="flex items-center gap-1.5 rounded-lg bg-black/50 px-2.5 py-1.5 text-[12px] text-white/90 backdrop-blur-sm transition-colors active:bg-black/70"
+			>
+				<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /></svg>
+				Rotate
+			</button>
+		</div>
 	</div>
 
 	<div class="rounded-card border border-border bg-surface-1 px-4 py-2 text-[13px]">
@@ -314,15 +354,6 @@
 			<span class="text-faint">Orientation</span><span class="text-text capitalize">{orientation}</span>
 		</div>
 		{#if error}<p class="pb-2 text-[12px] text-red-400">{error}</p>{/if}
-	</div>
-
-	<div class="grid grid-cols-2 gap-3">
-		<button onclick={flip} class="rounded-xl border border-border bg-surface-2 px-4 py-3.5 text-[14px] text-text transition-colors active:bg-surface-3">
-			Flip camera
-		</button>
-		<button onclick={requestRotate} class="rounded-xl border border-border bg-surface-2 px-4 py-3.5 text-[14px] text-text transition-colors active:bg-surface-3">
-			Rotate 90°
-		</button>
 	</div>
 
 	<p class="mt-auto text-center text-[12px] text-faint">

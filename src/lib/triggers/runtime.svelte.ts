@@ -1,5 +1,4 @@
 import { engine } from '../detection/engine.svelte';
-import type { ModalityFlags } from '../detection/mediapipe';
 import type { DetectionFrame, HandData } from '../detection/types';
 import { app } from '../stores/app.svelte';
 import type { Trigger } from '../types';
@@ -22,16 +21,6 @@ interface TriggerRunState {
 	armed: boolean;
 	/** When the pose dropped below the release threshold (null while detected). */
 	releasedSince: number | null;
-}
-
-/** Modalities required by the currently enabled triggers (both if none yet). */
-export function neededModalities(triggers: Trigger[]): ModalityFlags {
-	const enabled = triggers.filter((t) => t.enabled);
-	if (enabled.length === 0) return { face: true, hand: true };
-	return {
-		face: enabled.some((t) => t.modality === 'face'),
-		hand: enabled.some((t) => t.modality === 'hand')
-	};
 }
 
 function isDynamic(t: Trigger): boolean {

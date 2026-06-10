@@ -1,6 +1,5 @@
 import { getBridge } from '$lib/bridge';
 import { app } from '$lib/stores/app.svelte';
-import { neededModalities } from '$lib/triggers/runtime.svelte';
 import { engine } from './engine.svelte';
 
 /**
@@ -11,7 +10,10 @@ import { engine } from './engine.svelte';
 export async function startDetection(): Promise<void> {
 	engine.targetFps = app.settings.general.detectionFps;
 	engine.enhance = app.settings.general.enhanceLowLight;
-	engine.modalities = neededModalities(app.settings.triggers);
+	// Always run both detectors for the live preview — the dashboard shows the face
+	// mesh + hand skeleton regardless of which triggers exist, so the mesh must not
+	// be gated on having a face trigger configured.
+	engine.modalities = { face: true, hand: true };
 	await engine.startDetection(app.settings.general.cameraDeviceId);
 	getBridge()?.detection.notifyState(engine.detecting);
 }

@@ -42,8 +42,11 @@ class DetectionEngine {
 	/** Detection loop (MediaPipe) is running. */
 	detecting = $state(false);
 	fps = $state(0);
-	face = $state<FaceData | null>(null);
-	hands = $state<HandData[]>([]);
+	// Replaced wholesale every frame and only ever read (never mutated in place), so
+	// `$state.raw` skips the deep-proxy churn that otherwise runs ~18×/sec over every
+	// landmark — a real cost in the draw loop when a hand is tracked.
+	face = $state.raw<FaceData | null>(null);
+	hands = $state.raw<HandData[]>([]);
 	devices = $state<CameraDevice[]>([]);
 	stream = $state<MediaStream | null>(null);
 	targetFps = $state(18);
@@ -60,7 +63,7 @@ class DetectionEngine {
 
 	#detector = new Detector();
 	#video: HTMLVideoElement | null = null;
-	#timer: ReturnType<typeof setInterval> | null = null;
+	#timer: ReturnType<typeof setTimeout> | null = null;
 	#external = false;
 	#lastTs = 0;
 	#frameCount = 0;
@@ -203,43 +206,58 @@ class DetectionEngine {
 
 	#startLoop(): void {
 		this.#stopLoop();
-		const interval = Math.max(1000 / this.targetFps, 8);
 		this.#fpsWindowStart = performance.now();
 		this.#frameCount = 0;
-		this.#timer = setInterval(() => this.#tick(), interval);
+		this.#scheduleTick();
+	}
+
+	#scheduleTick(): void {
+		const interval = Math.max(1000 / this.targetFps, 8);
+		this.#timer = setTimeout(() => this.#tick(), interval);
 	}
 
 	#stopLoop(): void {
-		if (this.#timer) clearInterval(this.#timer);
+		if (this.#timer) clearTimeout(this.#timer);
 		this.#timer = null;
 	}
 
+	// Self-pacing: each tick schedules the next only AFTER its (synchronous,
+	// variable-cost) MediaPipe inference finishes. MediaPipe's recognizeForVideo is
+	// far heavier once a hand is actually tracked; a fixed-rate setInterval would
+	// queue those slow ticks back-to-back and starve rendering. This guarantees the
+	// UI gets `interval` ms to breathe between ticks — fps drops gracefully under
+	// load instead of the whole app freezing.
 	#tick(): void {
-		const v = this.#video;
-		if (!v || v.readyState < 2) return;
-		// MediaPipe requires strictly increasing timestamps per detector.
-		const ts = Math.max(performance.now(), this.#lastTs + 1);
-		this.#lastTs = ts;
-
-		const input = this.enhance || this.rotation ? this.#preprocess(v) : v;
-		let frame: DetectionFrame;
+		this.#timer = null;
 		try {
-			frame = this.#detector.detect(input, ts, this.modalities);
-		} catch (err) {
-			this.error = err instanceof Error ? err.message : String(err);
-			return;
-		}
+			const v = this.#video;
+			if (!v || v.readyState < 2) return;
+			// MediaPipe requires strictly increasing timestamps per detector.
+			const ts = Math.max(performance.now(), this.#lastTs + 1);
+			this.#lastTs = ts;
 
-		this.face = frame.face;
-		this.hands = frame.hands;
-		this.onFrame?.(frame);
+			const input = this.enhance || this.rotation ? this.#preprocess(v) : v;
+			let frame: DetectionFrame;
+			try {
+				frame = this.#detector.detect(input, ts, this.modalities);
+			} catch (err) {
+				this.error = err instanceof Error ? err.message : String(err);
+				return;
+			}
 
-		this.#frameCount++;
-		const elapsed = ts - this.#fpsWindowStart;
-		if (elapsed >= 500) {
-			this.fps = Math.round((this.#frameCount / elapsed) * 1000);
-			this.#frameCount = 0;
-			this.#fpsWindowStart = ts;
+			this.face = frame.face;
+			this.hands = frame.hands;
+			this.onFrame?.(frame);
+
+			this.#frameCount++;
+			const elapsed = ts - this.#fpsWindowStart;
+			if (elapsed >= 500) {
+				this.fps = Math.round((this.#frameCount / elapsed) * 1000);
+				this.#frameCount = 0;
+				this.#fpsWindowStart = ts;
+			}
+		} finally {
+			if (this.detecting) this.#scheduleTick();
 		}
 	}
 

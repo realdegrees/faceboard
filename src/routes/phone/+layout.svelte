@@ -7,3 +7,14 @@
 <div class="min-h-screen w-full bg-bg text-text">
 	{@render children()}
 </div>
+
+<!-- The desktop shell locks `body { overflow: hidden }`; the phone page is a real
+     mobile web page and must scroll to reach the controls below the preview. -->
+<style>
+	:global(html),
+	:global(body) {
+		height: auto;
+		min-height: 100%;
+		overflow-y: auto;
+	}
+</style>
