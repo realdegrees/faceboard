@@ -32,32 +32,59 @@
 	let drawer: DrawingUtils | null = null;
 	let drawerCtx: CanvasRenderingContext2D | null = null;
 
-	// Reshape + fit the captured landmarks into a centred 0..1 box (no distortion).
+	type V3 = [number, number, number];
+	const sub3 = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+	const dot3 = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+	const cross3 = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+	const nv = (v: V3): V3 => {
+		const l = Math.hypot(v[0], v[1], v[2]) || 1;
+		return [v[0] / l, v[1] / l, v[2] / l];
+	};
+
+	/** Rotate the captured mesh to look straight forward using the eye / forehead /
+	 *  chin axes, so the head angle at capture time doesn't matter. */
+	function frontalize(lm: number[]): V3[] {
+		const n = Math.floor(lm.length / 3);
+		const p = (i: number): V3 => [lm[i * 3], lm[i * 3 + 1], lm[i * 3 + 2]];
+		const right = nv(sub3(p(263), p(33))); // between eye outer corners
+		let down = nv(sub3(p(152), p(10))); // chin - forehead
+		const proj = dot3(down, right);
+		down = nv([down[0] - right[0] * proj, down[1] - right[1] * proj, down[2] - right[2] * proj]);
+		const forward = nv(cross3(right, down));
+		const c: V3 = [0, 0, 0];
+		for (let i = 0; i < n; i++) {
+			const q = p(i);
+			c[0] += q[0];
+			c[1] += q[1];
+			c[2] += q[2];
+		}
+		c[0] /= n;
+		c[1] /= n;
+		c[2] /= n;
+		const out: V3[] = [];
+		for (let i = 0; i < n; i++) {
+			const v = sub3(p(i), c);
+			out.push([dot3(v, right), dot3(v, down), dot3(v, forward)]);
+		}
+		return out;
+	}
+
+	// Frontalize, then fit the mesh into a centred 0..1 box (no distortion).
 	const norm = $derived.by(() => {
 		const n = Math.floor(landmarks.length / 3);
-		if (n < 3) return [] as { x: number; y: number; z: number; visibility: number }[];
+		if (n < 200) return [] as { x: number; y: number; z: number; visibility: number }[];
+		const fr = frontalize(landmarks);
 		let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-		for (let i = 0; i < n; i++) {
-			const x = landmarks[i * 3];
-			const y = landmarks[i * 3 + 1];
-			if (x < minX) minX = x;
-			if (x > maxX) maxX = x;
-			if (y < minY) minY = y;
-			if (y > maxY) maxY = y;
+		for (const q of fr) {
+			if (q[0] < minX) minX = q[0];
+			if (q[0] > maxX) maxX = q[0];
+			if (q[1] < minY) minY = q[1];
+			if (q[1] > maxY) maxY = q[1];
 		}
 		const cx = (minX + maxX) / 2;
 		const cy = (minY + maxY) / 2;
 		const scale = 0.82 / Math.max(maxX - minX, maxY - minY || 1e-6);
-		const out = [];
-		for (let i = 0; i < n; i++) {
-			out.push({
-				x: 0.5 + (landmarks[i * 3] - cx) * scale,
-				y: 0.5 + (landmarks[i * 3 + 1] - cy) * scale,
-				z: 0,
-				visibility: 0
-			});
-		}
-		return out;
+		return fr.map((q) => ({ x: 0.5 + (q[0] - cx) * scale, y: 0.5 + (q[1] - cy) * scale, z: 0, visibility: 0 }));
 	});
 
 	function centroid(ids: number[]): { x: number; y: number } | null {

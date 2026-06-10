@@ -101,6 +101,41 @@ export function normalizeStaticPose(hands: HandData[]): number[] {
 	return out;
 }
 
+/**
+ * Rotation/translation invariant pose descriptor: the set of pairwise distances
+ * between all landmarks. Two poses that differ only by orientation (upside down,
+ * backwards) produce the same descriptor. Input is a flat 3D point list.
+ */
+export function pairwiseDescriptor(points: number[]): number[] {
+	const n = Math.floor(points.length / 3);
+	const out: number[] = [];
+	for (let i = 0; i < n; i++) {
+		const ix = points[i * 3];
+		const iy = points[i * 3 + 1];
+		const iz = points[i * 3 + 2];
+		for (let j = i + 1; j < n; j++) {
+			const dx = ix - points[j * 3];
+			const dy = iy - points[j * 3 + 1];
+			const dz = iz - points[j * 3 + 2];
+			out.push(Math.sqrt(dx * dx + dy * dy + dz * dz));
+		}
+	}
+	return out;
+}
+
+/** Mirror a flat point list across X (left hand <-> right hand chirality). */
+export function mirrorX(flat: number[]): number[] {
+	const out = flat.slice();
+	for (let i = 0; i < out.length; i += 3) out[i] = -out[i];
+	return out;
+}
+
+/** Swap the two hands in a 2-hand (42-point) flat list. */
+export function swapHands(flat: number[]): number[] {
+	if (flat.length < 126) return flat.slice();
+	return [...flat.slice(63, 126), ...flat.slice(0, 63), ...flat.slice(126)];
+}
+
 /** Frames a dynamic gesture template/window is resampled to. */
 export const DYN_LEN = 24;
 

@@ -38,6 +38,8 @@
 	// Hand
 	let handCount = $state<1 | 2>(1);
 	let mode = $state<'pose' | 'gesture'>('pose');
+	let ignoreRotation = $state(false);
+	let eitherHand = $state(false);
 	let samples = $state<number[][]>([]);
 	let takes = $state<number[][][]>([]);
 	let recording = $state(false);
@@ -176,9 +178,10 @@
 				...base,
 				motion: 'dynamic',
 				hands: handCount,
+				eitherHand,
 				sequences: $state.snapshot(takes) as number[][][],
 				durationMs: avg,
-				threshold: 0.6,
+				threshold: 0.5,
 				cooldownMs: 900
 			});
 		} else {
@@ -186,6 +189,8 @@
 				...base,
 				motion: 'static',
 				hands: handCount,
+				rotationInvariant: ignoreRotation,
+				eitherHand,
 				samples: $state.snapshot(samples) as number[][],
 				threshold: 0.9,
 				cooldownMs: 800
@@ -291,6 +296,27 @@
 							<button class="{segBtn} {mode === 'gesture' ? 'bg-surface-3 text-text' : 'text-muted'}" onclick={() => (mode = 'gesture')}>Gesture</button>
 						</div>
 					</div>
+				</div>
+
+				<div class="flex flex-wrap gap-2">
+					{#if mode === 'pose'}
+						<button
+							onclick={() => (ignoreRotation = !ignoreRotation)}
+							class="rounded-full border px-2.5 py-1 text-[11px] transition-colors {ignoreRotation
+								? 'border-accent/50 bg-accent/15 text-accent'
+								: 'border-border bg-surface-2 text-muted hover:text-text'}"
+						>
+							Ignore rotation
+						</button>
+					{/if}
+					<button
+						onclick={() => (eitherHand = !eitherHand)}
+						class="rounded-full border px-2.5 py-1 text-[11px] transition-colors {eitherHand
+							? 'border-accent/50 bg-accent/15 text-accent'
+							: 'border-border bg-surface-2 text-muted hover:text-text'}"
+					>
+						{handCount === 2 ? 'Swappable hands' : 'Either hand'}
+					</button>
 				</div>
 
 				{#if isGesture}

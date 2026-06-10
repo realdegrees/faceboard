@@ -1,7 +1,15 @@
 import type { Trigger } from '../types';
 import type { DetectionFrame } from '../detection/types';
 import { getPreset } from './presets';
-import { bestCosine, faceVector, normalizeStaticPose, orderHands, subtractNeutral } from './features';
+import {
+	bestCosine,
+	faceVector,
+	mirrorX,
+	normalizeStaticPose,
+	orderHands,
+	pairwiseDescriptor,
+	subtractNeutral
+} from './features';
 import { getRegion, regionMatch } from './regions';
 
 /** Activation score in [0,1] for a trigger against one detection frame. */
@@ -56,16 +64,38 @@ function scoreCustom(trigger: Trigger, frame: DetectionFrame): number {
 	const samples = trigger.samples;
 	if (!samples || samples.length === 0) return 0;
 	const count = trigger.hands === 2 ? 2 : 1;
+	// Rotation-invariant poses compare pairwise-distance descriptors so any
+	// orientation matches (these are also mirror-invariant); otherwise compare
+	// the oriented normalized landmarks.
+	const rotInv = !!trigger.rotationInvariant;
+	const either = !!trigger.eitherHand;
+	const refs = rotInv ? samples.map(pairwiseDescriptor) : samples;
+	const feat = (pose: number[]) => (rotInv ? pairwiseDescriptor(pose) : pose);
+
+	// Candidate poses to compare: the detected hand(s), plus their mirror (other
+	// hand) and/or swapped order when "either hand" is enabled.
+	const candidates: number[][] = [];
 	if (count === 1) {
-		let best = 0;
 		for (const h of frame.hands) {
-			best = Math.max(best, bestCosine(normalizeStaticPose([h]), samples));
+			const v = normalizeStaticPose([h]);
+			candidates.push(v);
+			if (either && !rotInv) candidates.push(mirrorX(v));
 		}
-		return clampScore(best);
+	} else {
+		const ordered = orderHands(frame.hands, 2);
+		if (!ordered) return 0;
+		candidates.push(normalizeStaticPose(ordered));
+		if (either) {
+			candidates.push(normalizeStaticPose([ordered[1], ordered[0]]));
+			if (!rotInv) {
+				candidates.push(mirrorX(normalizeStaticPose(ordered)));
+				candidates.push(mirrorX(normalizeStaticPose([ordered[1], ordered[0]])));
+			}
+		}
 	}
-	const ordered = orderHands(frame.hands, 2);
-	if (!ordered) return 0;
-	return clampScore(bestCosine(normalizeStaticPose(ordered), samples));
+	let best = 0;
+	for (const c of candidates) best = Math.max(best, bestCosine(feat(c), refs));
+	return clampScore(best);
 }
 
 function clampScore(x: number): number {

@@ -65,6 +65,14 @@ const h1 = hand('Open_Palm');
 const h1moved = hand('Open_Palm', 0.9, [0.3, -0.2, 2.5]);
 assert(cosine(normalizeHand(h1), normalizeHand(h1moved)) > 0.999, 'hand normalization is translation + scale invariant');
 
+// --- rotation-invariant hand pose ---
+const poseBase = handWith('Right', [0, 0, 1]);
+const rotTrig = mkTrigger({ modality: 'hand', kind: 'custom', motion: 'static', hands: 1, rotationInvariant: true, samples: [normalizeStaticPose([poseBase])], threshold: 0.85 });
+const rotated: HandData = { ...poseBase, landmarks: poseBase.landmarks.map((p) => ({ ...p, x: -p.x, y: -p.y })) };
+assert(scoreTrigger(rotTrig, { tsMs: 0, face: null, hands: [rotated] }) > 0.95, 'rotation-invariant pose matches a 180°-rotated hand');
+const fixedTrig = mkTrigger({ modality: 'hand', kind: 'custom', motion: 'static', hands: 1, samples: [normalizeStaticPose([poseBase])], threshold: 0.85 });
+assert(scoreTrigger(fixedTrig, { tsMs: 0, face: null, hands: [rotated] }) < scoreTrigger(rotTrig, { tsMs: 0, face: null, hands: [rotated] }), 'a fixed pose is more orientation-sensitive than a rotation-invariant one');
+
 // --- custom hand (static, 1 hand) ---
 const customHand = mkTrigger({ modality: 'hand', kind: 'custom', motion: 'static', hands: 1, samples: [normalizeStaticPose([h1])], threshold: 0.9 });
 assert(scoreTrigger(customHand, { tsMs: 0, face: null, hands: [h1moved] }) > 0.99, 'custom 1-hand pose matches the same pose moved/scaled');
@@ -122,6 +130,12 @@ assert(scoreTrigger(faceTrig, frameFace({ mouthPucker: 0.85, browOuterUpLeft: 0.
 
 const mouthOnly = mkTrigger({ modality: 'face', kind: 'custom', target: faceVector(faceData({ mouthPucker: 0.85 })), regions: ['mouth'], threshold: 0.7 });
 assert(scoreTrigger(mouthOnly, frameFace({ mouthPucker: 0.85, browDownLeft: 0.9 })) > 0.85, 'unselected regions (brows) are ignored');
+
+// pattern/intensity invariance: a weaker version of the same expression still matches
+const smileTarget = faceVector(faceData({ mouthSmileLeft: 0.9, mouthSmileRight: 0.9 }));
+const smileTrig = mkTrigger({ modality: 'face', kind: 'custom', target: smileTarget, regions: ['mouth'], threshold: 0.8 });
+assert(scoreTrigger(smileTrig, frameFace({ mouthSmileLeft: 0.45, mouthSmileRight: 0.4 })) > 0.85, 'face match is intensity-invariant (a softer smile still matches)');
+assert(scoreTrigger(smileTrig, frameFace({})) === 0, 'relaxed face does not match an active expression');
 
 console.log(failures === 0 ? 'ALL_PASS' : 'FAILURES=' + failures);
 process.exit(failures === 0 ? 0 : 1);

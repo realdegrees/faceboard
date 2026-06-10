@@ -1,8 +1,14 @@
+import { FaceLandmarker, GestureRecognizer } from '@mediapipe/tasks-vision';
 import { getBridge, type LanInfo } from '$lib/bridge';
 import { engine } from '$lib/detection/engine.svelte';
 import { app } from '$lib/stores/app.svelte';
 import { neededModalities } from '$lib/triggers/runtime.svelte';
 import { Signaling } from './signaling';
+
+// Flattened mesh/skeleton connections sent once to the phone so it can draw the
+// overlay without loading MediaPipe.
+const FACE_CONNS = FaceLandmarker.FACE_LANDMARKS_TESSELATION.flatMap((c) => [c.start, c.end]);
+const HAND_CONNS = GestureRecognizer.HAND_CONNECTIONS.flatMap((c) => [c.start, c.end]);
 
 export type HostState = 'idle' | 'starting' | 'waiting' | 'connecting' | 'connected' | 'error';
 
@@ -30,6 +36,9 @@ class PhoneHost {
 
 	#sig: Signaling | null = null;
 	#pc: RTCPeerConnection | null = null;
+	#dc: RTCDataChannel | null = null;
+	#overlayTimer: ReturnType<typeof setInterval> | null = null;
+	#pingTimer: ReturnType<typeof setInterval> | null = null;
 
 	async start(): Promise<void> {
 		const bridge = getBridge();
@@ -53,6 +62,8 @@ class PhoneHost {
 			};
 			await this.#sig.connect(lan.signalUrl, 'host', lan.token);
 			this.state = 'waiting';
+			// Heartbeat so the phone can detect a dropped desktop quickly.
+			this.#pingTimer = setInterval(() => this.#sig?.send({ type: 'ping' }), 2000);
 		} catch (err) {
 			this.state = 'error';
 			this.error = err instanceof Error ? err.message : String(err);
@@ -77,8 +88,35 @@ class PhoneHost {
 				this.state = 'waiting';
 			}
 		};
+		// The phone opens an "overlay" data channel; we stream landmarks to it so
+		// the phone can draw the same mesh/skeleton the desktop sees.
+		pc.ondatachannel = (e) => {
+			this.#dc = e.channel;
+			this.#dc.onopen = () => this.#startOverlay();
+		};
 		this.#pc = pc;
 		return pc;
+	}
+
+	#startOverlay(): void {
+		if (!this.#dc) return;
+		try {
+			this.#dc.send(JSON.stringify({ t: 'conns', fc: FACE_CONNS, hc: HAND_CONNS }));
+		} catch {
+			/* ignore */
+		}
+		if (this.#overlayTimer) clearInterval(this.#overlayTimer);
+		const r = (v: number) => Math.round(v * 1000) / 1000;
+		this.#overlayTimer = setInterval(() => {
+			if (!this.#dc || this.#dc.readyState !== 'open') return;
+			const f = engine.face?.landmarks ? engine.face.landmarks.flatMap((p) => [r(p.x), r(p.y)]) : [];
+			const h = engine.hands.map((hd) => hd.landmarks.flatMap((p) => [r(p.x), r(p.y)]));
+			try {
+				this.#dc.send(JSON.stringify({ t: 'lm', f, h }));
+			} catch {
+				/* ignore */
+			}
+		}, 66);
 	}
 
 	async #onSignal(signal: RtcSignal): Promise<void> {
@@ -121,11 +159,17 @@ class PhoneHost {
 	}
 
 	#teardownPc(): void {
+		if (this.#overlayTimer) clearInterval(this.#overlayTimer);
+		this.#overlayTimer = null;
+		this.#dc?.close();
+		this.#dc = null;
 		this.#pc?.close();
 		this.#pc = null;
 	}
 
 	async stop(): Promise<void> {
+		if (this.#pingTimer) clearInterval(this.#pingTimer);
+		this.#pingTimer = null;
 		this.#teardownPc();
 		this.#sig?.close();
 		this.#sig = null;

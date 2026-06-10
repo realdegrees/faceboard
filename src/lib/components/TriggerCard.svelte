@@ -47,6 +47,25 @@
 		}
 		app.updateTrigger(trigger.id, { soundId: v || null });
 	}
+	function setRetrigger(e: Event) {
+		app.updateTrigger(trigger.id, {
+			retrigger: (e.target as HTMLSelectElement).value as 'once' | 'while-held'
+		});
+	}
+	function setRotation(e: Event) {
+		app.updateTrigger(trigger.id, { rotationInvariant: (e.target as HTMLSelectElement).value === 'any' });
+	}
+	function setEither(e: Event) {
+		app.updateTrigger(trigger.id, { eitherHand: (e.target as HTMLSelectElement).value === 'either' });
+	}
+
+	const isDynamic = $derived(
+		trigger.modality === 'hand' && trigger.kind === 'custom' && trigger.motion === 'dynamic'
+	);
+	const isHandPose = $derived(
+		trigger.modality === 'hand' && trigger.kind === 'custom' && trigger.motion !== 'dynamic'
+	);
+	const isHandCustom = $derived(trigger.modality === 'hand' && trigger.kind === 'custom');
 </script>
 
 <div
@@ -156,17 +175,19 @@
 			/>
 		</label>
 
-		<label class="flex flex-col gap-1">
-			<span class="text-[11px] text-faint">Hold (ms)</span>
-			<input
-				type="number"
-				min="0"
-				step="50"
-				value={trigger.holdMs}
-				oninput={setHold}
-				class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] outline-none focus:border-border-strong"
-			/>
-		</label>
+		{#if !isDynamic}
+			<label class="flex flex-col gap-1">
+				<span class="text-[11px] text-faint">Hold (ms)</span>
+				<input
+					type="number"
+					min="0"
+					step="50"
+					value={trigger.holdMs}
+					oninput={setHold}
+					class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] outline-none focus:border-border-strong"
+				/>
+			</label>
+		{/if}
 
 		<label class="flex flex-col gap-1">
 			<span class="text-[11px] text-faint">Cooldown (ms)</span>
@@ -179,6 +200,48 @@
 				class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] outline-none focus:border-border-strong"
 			/>
 		</label>
+
+		{#if !isDynamic}
+			<label class="flex flex-col gap-1">
+				<span class="text-[11px] text-faint">Replay</span>
+				<select
+					value={trigger.retrigger ?? 'once'}
+					onchange={setRetrigger}
+					class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] text-muted outline-none focus:border-border-strong"
+				>
+					<option value="once">Once</option>
+					<option value="while-held">While held</option>
+				</select>
+			</label>
+		{/if}
+
+		{#if isHandPose}
+			<label class="flex flex-col gap-1">
+				<span class="text-[11px] text-faint">Rotation</span>
+				<select
+					value={trigger.rotationInvariant ? 'any' : 'fixed'}
+					onchange={setRotation}
+					class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] text-muted outline-none focus:border-border-strong"
+				>
+					<option value="fixed">Fixed</option>
+					<option value="any">Any</option>
+				</select>
+			</label>
+		{/if}
+
+		{#if isHandCustom}
+			<label class="flex flex-col gap-1">
+				<span class="text-[11px] text-faint">{trigger.hands === 2 ? 'Hand order' : 'Either hand'}</span>
+				<select
+					value={trigger.eitherHand ? 'either' : 'fixed'}
+					onchange={setEither}
+					class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] text-muted outline-none focus:border-border-strong"
+				>
+					<option value="fixed">As recorded</option>
+					<option value="either">{trigger.hands === 2 ? 'Swappable' : 'Either'}</option>
+				</select>
+			</label>
+		{/if}
 	</div>
 </div>
 

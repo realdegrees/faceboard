@@ -25,6 +25,10 @@ export interface Trigger {
 	hands?: 1 | 2;
 	/** Hand triggers: held pose vs moving gesture (default 'static'). */
 	motion?: 'static' | 'dynamic';
+	/** Hand poses: match the pose regardless of hand orientation (upside down etc.). */
+	rotationInvariant?: boolean;
+	/** Hand triggers: also match the other hand (1-hand) / swapped hands (2-hand). */
+	eitherHand?: boolean;
 	/** Dynamic gestures: few-shot motion templates (normalized + resampled). */
 	sequences?: number[][][];
 	/** Dynamic gestures: typical recorded duration (ms), sizes the live window. */
@@ -33,8 +37,11 @@ export interface Trigger {
 	threshold: number;
 	/** Match must be sustained this long (ms) before the sound fires. */
 	holdMs: number;
-	/** Minimum gap (ms) between consecutive fires of this trigger. */
+	/** Minimum gap (ms) between consecutive fires / re-arm delay after release. */
 	cooldownMs: number;
+	/** 'once' = fire once per detection, re-arm only after the pose is released for
+	 *  cooldownMs. 'while-held' = repeat every cooldownMs while held. Default 'once'. */
+	retrigger?: 'once' | 'while-held';
 	/** Linked sound id, or null if unlinked. */
 	soundId: string | null;
 	enabled: boolean;
