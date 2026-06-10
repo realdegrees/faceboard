@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Faceboard detection benchmark</title>
+	</head>
+	<body>
+		<canvas id="c" width="640" height="480"></canvas>
+		<pre id="out"></pre>
+		<script type="module">
+			import { FilesetResolver, FaceLandmarker, GestureRecognizer } from './vision_bundle.mjs';
+
+			const out = document.getElementById('out');
+			const log = (m) => {
+				(window.__log ??= []).push(m);
+				out.textContent += m + '\n';
+				console.log(m);
+			};
+			window.__done = false;
+
+			function glRenderer() {
+				try {
+					const gl = document.createElement('canvas').getContext('webgl2');
+					const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+					return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : 'unknown';
+				} catch {
+					return 'unknown';
+				}
+			}
+
+			async function bench(vision, c, delegate) {
+				const face = await FaceLandmarker.createFromOptions(vision, {
+					baseOptions: { modelAssetPath: '/models/face_landmarker.task', delegate },
+					outputFaceBlendshapes: true,
+					runningMode: 'VIDEO',
+					numFaces: 1
+				});
+				const hand = await GestureRecognizer.createFromOptions(vision, {
+					baseOptions: { modelAssetPath: '/models/gesture_recognizer.task', delegate },
+					runningMode: 'VIDEO',
+					numHands: 2
+				});
+				let ts = 1;
+				for (let i = 0; i < 5; i++) {
+					face.detectForVideo(c, ts++);
+					hand.recognizeForVideo(c, ts++);
+				}
+				const N = 40;
+				let f = 0,
+					h = 0;
+				for (let i = 0; i < N; i++) {
+					let a = performance.now();
+					face.detectForVideo(c, ts++);
+					let b = performance.now();
+					hand.recognizeForVideo(c, ts++);
+					let d = performance.now();
+					f += b - a;
+					h += d - b;
+				}
+				face.close();
+				hand.close();
+				const faceMs = f / N,
+					handMs = h / N,
+					bothMs = (f + h) / N;
+				return { delegate, faceMs, handMs, bothMs, fps: 1000 / bothMs };
+			}
+
+			(async () => {
+				try {
+					const c = document.getElementById('c');
+					const ctx = c.getContext('2d');
+					const img = ctx.createImageData(640, 480);
+					for (let i = 0; i < img.data.length; i += 4) {
+						img.data[i] = (i * 7) % 255;
+						img.data[i + 1] = (i * 3) % 255;
+						img.data[i + 2] = (i * 5) % 255;
+						img.data[i + 3] = 255;
+					}
+					ctx.putImageData(img, 0, 0);
+
+					log('renderer = ' + glRenderer());
+					const vision = await FilesetResolver.forVisionTasks('/wasm');
+
+					const results = [];
+					for (const d of ['GPU', 'CPU']) {
+						try {
+							const r = await bench(vision, c, d);
+							results.push(r);
+							log(
+								`${d}: face=${r.faceMs.toFixed(1)}ms hand=${r.handMs.toFixed(1)}ms both=${r.bothMs.toFixed(1)}ms => ${r.fps.toFixed(1)} fps`
+							);
+						} catch (e) {
+							log(`${d}: FAILED (${e && e.message})`);
+						}
+					}
+					window.__results = { renderer: glRenderer(), results };
+				} catch (e) {
+					log('ERROR ' + (e && e.message));
+					window.__error = String(e);
+				}
+				window.__done = true;
+			})();
+		</script>
+	</body>
+</html>
