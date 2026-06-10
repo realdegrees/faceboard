@@ -1,5 +1,6 @@
 import { getBridge } from '$lib/bridge';
 import { app } from '$lib/stores/app.svelte';
+import { runtime } from '$lib/triggers/runtime.svelte';
 import { engine } from './engine.svelte';
 
 /**
@@ -20,6 +21,7 @@ export async function startDetection(): Promise<void> {
 /** Stop the detection loop but keep the camera preview on. */
 export function stopDetection(): void {
 	engine.stopDetection();
+	runtime.stopAllGates(); // don't leave a 'while-active' sound looping
 	getBridge()?.detection.notifyState(false);
 }
 

@@ -13,6 +13,9 @@ class SoundPlayer {
 	#ctx: AudioContext | null = null;
 	#buffers = new Map<string, AudioBuffer>();
 	#loading = new Map<string, Promise<AudioBuffer | null>>();
+	// Looping sources for 'while-active' (gate) triggers, keyed by sound id.
+	#gates = new Map<string, AudioBufferSourceNode>();
+	#gatePending = new Set<string>();
 
 	#context(): AudioContext {
 		this.#ctx ??= new AudioContext();
@@ -67,6 +70,48 @@ class SoundPlayer {
 			const i = this.playingIds.indexOf(soundId);
 			if (i >= 0) this.playingIds = [...this.playingIds.slice(0, i), ...this.playingIds.slice(i + 1)];
 		};
+	}
+
+	/** Start looping a sound for a 'while-active' trigger (no-op if already gating). */
+	async startGate(soundId: string, volumeOverride?: number): Promise<void> {
+		if (this.#gates.has(soundId) || this.#gatePending.has(soundId)) return;
+		const sound = app.settings.sounds.find((s) => s.id === soundId);
+		if (!sound) return;
+		this.#gatePending.add(soundId);
+		const buffer = this.#buffers.get(soundId) ?? (await this.load(soundId, sound.path));
+		// stopGate may have been called while the buffer was loading.
+		if (!this.#gatePending.delete(soundId) || !buffer) return;
+
+		const ctx = this.#context();
+		const src = ctx.createBufferSource();
+		src.buffer = buffer;
+		src.loop = true;
+		const gain = ctx.createGain();
+		gain.gain.value = volumeOverride ?? sound.volume ?? 1;
+		src.connect(gain).connect(ctx.destination);
+		src.start();
+		this.#gates.set(soundId, src);
+		if (!this.playingIds.includes(soundId)) this.playingIds = [...this.playingIds, soundId];
+	}
+
+	/** Stop a gated sound. */
+	stopGate(soundId: string): void {
+		this.#gatePending.delete(soundId);
+		const src = this.#gates.get(soundId);
+		if (src) {
+			this.#gates.delete(soundId);
+			try {
+				src.stop();
+			} catch {
+				/* already stopped */
+			}
+		}
+		const i = this.playingIds.indexOf(soundId);
+		if (i >= 0) this.playingIds = [...this.playingIds.slice(0, i), ...this.playingIds.slice(i + 1)];
+	}
+
+	stopAllGates(): void {
+		for (const id of [...this.#gates.keys(), ...this.#gatePending]) this.stopGate(id);
 	}
 
 	/** Drop a cached buffer (e.g. after the file path changes). */

@@ -21,6 +21,12 @@ interface TriggerRunState {
 	armed: boolean;
 	/** When the pose dropped below the release threshold (null while detected). */
 	releasedSince: number | null;
+	/** Consecutive detections accumulated toward repeatCount. */
+	repeatHits: number;
+	/** Timestamp of the last detection (for the repeat grace window). */
+	lastHit: number;
+	/** 'while-active' (gate) playback is currently sounding for this trigger. */
+	gateOn: boolean;
 }
 
 function isDynamic(t: Trigger): boolean {
@@ -74,6 +80,9 @@ class TriggerRuntime {
 	recent = $state<{ id: string; name: string; ts: number }[]>([]);
 
 	onFire: ((trigger: Trigger) => void) | null = null;
+	/** 'while-active' playback: start when the trigger activates, stop when it ends. */
+	onGateStart: ((trigger: Trigger) => void) | null = null;
+	onGateStop: ((trigger: Trigger) => void) | null = null;
 
 	#runState = new Map<string, TriggerRunState>();
 	#wired = false;
@@ -114,9 +123,11 @@ class TriggerRuntime {
 				if (st.armed && ts - st.holdStart >= t.holdMs) {
 					st.lastFired = ts;
 					st.armed = false;
-					this.#fire(t);
+					this.#onDetection(t, ts);
 				}
 			} else {
+				// Pose no longer active — end any gated ('while-active') playback.
+				if (st.gateOn) this.#stopGate(t, st);
 				if (score < t.threshold * 0.8) {
 					st.holdStart = null;
 					if (st.releasedSince === null) st.releasedSince = ts;
@@ -212,7 +223,7 @@ class TriggerRuntime {
 				const st = this.#stateFor(t.id);
 				if (end - st.lastFired >= Math.max(t.cooldownMs, 500)) {
 					st.lastFired = end;
-					this.#fire(t);
+					this.#onDetection(t, end);
 				}
 			}
 		}
@@ -228,15 +239,72 @@ class TriggerRuntime {
 		return frames;
 	}
 
+	/** A confirmed detection edge. Applies the repeat-N-times-in-a-row gate, then
+	 *  activates (fires once, or starts gated playback). */
+	#onDetection(t: Trigger, ts: number): void {
+		const st = this.#stateFor(t.id);
+		const repeat = Math.max(1, Math.round(t.repeatCount ?? 1));
+		if (repeat > 1) {
+			const grace = t.repeatGraceMs ?? 1500;
+			if (ts - st.lastHit > grace) st.repeatHits = 0; // grace expired — start over
+			st.repeatHits++;
+			st.lastHit = ts;
+			if (st.repeatHits < repeat) return; // not enough consecutive detections yet
+			st.repeatHits = 0;
+		}
+		this.#activate(t, st);
+	}
+
+	#activate(t: Trigger, st: TriggerRunState): void {
+		// Gate playback only applies to a sustained (static) trigger; a momentary
+		// gesture always fires once.
+		if ((t.playback ?? 'once') === 'while-active' && !isDynamic(t)) {
+			if (!st.gateOn) {
+				st.gateOn = true;
+				this.onGateStart?.(t);
+				this.#recordRecent(t);
+			}
+			return;
+		}
+		this.#fire(t);
+	}
+
+	#stopGate(t: Trigger, st: TriggerRunState): void {
+		st.gateOn = false;
+		this.onGateStop?.(t);
+	}
+
+	/** Stop every active gate (e.g. when detection is turned off). */
+	stopAllGates(): void {
+		for (const [id, st] of this.#runState) {
+			if (!st.gateOn) continue;
+			st.gateOn = false;
+			const t = app.settings.triggers.find((x) => x.id === id);
+			if (t) this.onGateStop?.(t);
+		}
+	}
+
 	#fire(trigger: Trigger): void {
 		this.onFire?.(trigger);
+		this.#recordRecent(trigger);
+	}
+
+	#recordRecent(trigger: Trigger): void {
 		this.recent = [{ id: trigger.id, name: trigger.name, ts: Date.now() }, ...this.recent].slice(0, 12);
 	}
 
 	#stateFor(id: string): TriggerRunState {
 		let st = this.#runState.get(id);
 		if (!st) {
-			st = { holdStart: null, lastFired: -Infinity, armed: true, releasedSince: null };
+			st = {
+				holdStart: null,
+				lastFired: -Infinity,
+				armed: true,
+				releasedSince: null,
+				repeatHits: 0,
+				lastHit: -Infinity,
+				gateOn: false
+			};
 			this.#runState.set(id, st);
 		}
 		return st;

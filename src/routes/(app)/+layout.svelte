@@ -20,6 +20,13 @@
 		runtime.onFire = (trigger) => {
 			if (trigger.soundId) void soundPlayer.play(trigger.soundId);
 		};
+		// 'while-active' (gate) triggers: loop the sound while active, stop on release.
+		runtime.onGateStart = (trigger) => {
+			if (trigger.soundId) void soundPlayer.startGate(trigger.soundId);
+		};
+		runtime.onGateStop = (trigger) => {
+			if (trigger.soundId) soundPlayer.stopGate(trigger.soundId);
+		};
 		const offToggle = bridge?.detection.onToggle(() => void toggleDetection());
 
 		void (async () => {
