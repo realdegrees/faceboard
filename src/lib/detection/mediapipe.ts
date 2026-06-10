@@ -5,7 +5,7 @@ import {
 	type FaceLandmarkerResult,
 	type GestureRecognizerResult
 } from '@mediapipe/tasks-vision';
-import type { DetectionFrame, FaceData, HandData } from './types';
+import type { DetectionFrame, FaceData, HandData, HeadPose } from './types';
 
 // All assets are served locally so the running app never hits the network.
 export const WASM_PATH = '/mediapipe/wasm';
@@ -26,7 +26,8 @@ export function createFaceLandmarker(vision: Vision, delegate: Delegate): Promis
 	return FaceLandmarker.createFromOptions(vision, {
 		baseOptions: { modelAssetPath: FACE_MODEL, delegate },
 		outputFaceBlendshapes: true,
-		outputFacialTransformationMatrixes: false,
+		// Needed for head pose (yaw/pitch/roll) — "looking left", tilt, etc.
+		outputFacialTransformationMatrixes: true,
 		runningMode: 'VIDEO',
 		numFaces: 1,
 		minFaceDetectionConfidence: 0.3,
@@ -55,8 +56,27 @@ export function toFace(result: FaceLandmarkerResult): FaceData | null {
 	}
 	return {
 		blendshapes,
-		landmarks: landmarks.map((p) => ({ x: p.x, y: p.y, z: p.z, visibility: p.visibility ?? 0 }))
+		landmarks: landmarks.map((p) => ({ x: p.x, y: p.y, z: p.z, visibility: p.visibility ?? 0 })),
+		headPose: headPoseFromMatrix(result.facialTransformationMatrixes?.[0]?.data)
 	};
+}
+
+const RAD2DEG = 180 / Math.PI;
+
+/** Decompose the 4×4 (column-major) facial transformation matrix into head-pose
+ *  Euler angles in degrees. yaw = left/right, pitch = up/down, roll = tilt. */
+function headPoseFromMatrix(data: number[] | Float32Array | undefined): HeadPose | null {
+	if (!data || data.length < 11) return null;
+	// Column-major: element(row r, col c) = data[c*4 + r].
+	const r00 = data[0],
+		r10 = data[1],
+		r20 = data[2],
+		r21 = data[6],
+		r22 = data[10];
+	const pitch = Math.atan2(r21, r22) * RAD2DEG;
+	const yaw = Math.atan2(-r20, Math.hypot(r21, r22)) * RAD2DEG;
+	const roll = Math.atan2(r10, r00) * RAD2DEG;
+	return { yaw, pitch, roll };
 }
 
 export function toHands(result: GestureRecognizerResult): HandData[] {

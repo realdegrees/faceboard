@@ -11,11 +11,20 @@ export interface Point {
 /** Back-compat alias. */
 export type HandPoint = Point;
 
+export interface HeadPose {
+	/** Degrees. yaw = turn left/right, pitch = look up/down, roll = tilt head. */
+	yaw: number;
+	pitch: number;
+	roll: number;
+}
+
 export interface FaceData {
 	/** ARKit-style blendshape name -> coefficient in [0,1]. ~52 entries. */
 	blendshapes: Record<string, number>;
 	/** 478 face-mesh landmarks (normalized image space) for the preview overlay. */
 	landmarks: Point[];
+	/** Head orientation from the facial transformation matrix, if available. */
+	headPose?: HeadPose | null;
 }
 
 export interface HandData {

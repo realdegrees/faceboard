@@ -1,4 +1,5 @@
 import { Detector, type Delegate, type ModalityFlags } from './mediapipe';
+import { FaceSmoother } from './smoothing';
 import type { DetectionFrame, FaceData, HandData } from './types';
 
 export type EngineStatus = 'idle' | 'loading' | 'error';
@@ -124,6 +125,16 @@ class DetectionEngine {
 
 	// Canvas reused only to rotate sideways (phone) feeds before inference.
 	#procCanvas: HTMLCanvasElement | null = null;
+	// One Euro smoothing of blendshapes + head pose (de-jitter for clean matching).
+	#faceSmoother = new FaceSmoother();
+
+	#smoothFace(face: FaceData | null, ts: number): FaceData | null {
+		if (!face) {
+			this.#faceSmoother.reset();
+			return null;
+		}
+		return this.#faceSmoother.apply(face, ts);
+	}
 
 	/** True when WebGL is software-emulated — detection then runs on the CPU
 	 *  delegate (faster than software "GPU"), and the UI flags it for the user. */
@@ -204,6 +215,7 @@ class DetectionEngine {
 	/** Stop the detection loop but keep the camera on for preview. */
 	stopDetection(): void {
 		this.#stopLoop();
+		this.#faceSmoother.reset();
 		this.detecting = false;
 		this.face = null;
 		this.hands = [];
@@ -359,9 +371,9 @@ class DetectionEngine {
 			this.#watchdog = null;
 		}
 		if (!this.detecting || this.#mode !== 'worker') return;
-		this.face = msg.face;
+		this.face = this.#smoothFace(msg.face, msg.ts);
 		this.hands = msg.hands;
-		this.onFrame?.({ tsMs: msg.ts, face: msg.face, hands: msg.hands });
+		this.onFrame?.({ tsMs: msg.ts, face: this.face, hands: msg.hands });
 		this.#countFps();
 		// Pace the next send toward targetFps (measured from the last send so the
 		// rate is min(targetFps, worker throughput)).
@@ -500,9 +512,9 @@ class DetectionEngine {
 				this.error = err instanceof Error ? err.message : String(err);
 				return;
 			}
-			this.face = frame.face;
+			this.face = this.#smoothFace(frame.face, ts);
 			this.hands = frame.hands;
-			this.onFrame?.(frame);
+			this.onFrame?.({ tsMs: ts, face: this.face, hands: frame.hands });
 			this.#countFps();
 		} finally {
 			if (this.detecting && this.#mode === 'main') {
