@@ -13,7 +13,6 @@
 	let captureModality = $state<Modality | null>(null);
 
 	const triggers = $derived(app.settings.triggers);
-	const facePresets = PRESETS.filter((p) => p.modality === 'face');
 	const handPresets = PRESETS.filter((p) => p.modality === 'hand');
 
 	function addPreset(p: Preset) {
@@ -85,34 +84,19 @@
 	{/if}
 </section>
 
-<!-- Preset picker -->
-<Modal open={presetOpen} title="Add a preset trigger" onClose={() => (presetOpen = false)} maxWidth="40rem">
-	<div class="grid grid-cols-1 gap-5 p-5 sm:grid-cols-2">
-		<div>
-			<h3 class="mb-2 text-[11px] font-medium tracking-wide text-faint uppercase">Facial expressions</h3>
-			<div class="flex flex-col gap-1">
-				{#each facePresets as p (p.id)}
-					<button
-						onclick={() => addPreset(p)}
-						class="rounded-lg border border-border bg-surface-2 px-3 py-2 text-left text-[13px] text-text transition-colors hover:border-border-strong hover:bg-surface-3"
-					>
-						{p.name}
-					</button>
-				{/each}
-			</div>
-		</div>
-		<div>
-			<h3 class="mb-2 text-[11px] font-medium tracking-wide text-faint uppercase">Hand signs</h3>
-			<div class="flex flex-col gap-1">
-				{#each handPresets as p (p.id)}
-					<button
-						onclick={() => addPreset(p)}
-						class="rounded-lg border border-border bg-surface-2 px-3 py-2 text-left text-[13px] text-text transition-colors hover:border-border-strong hover:bg-surface-3"
-					>
-						{p.name}
-					</button>
-				{/each}
-			</div>
+<!-- Preset picker (builtin hand signs; facial expressions are recorded) -->
+<Modal open={presetOpen} title="Add a hand-sign preset" onClose={() => (presetOpen = false)} maxWidth="34rem">
+	<div class="p-5">
+		<h3 class="mb-2 text-[11px] font-medium tracking-wide text-faint uppercase">Hand signs</h3>
+		<div class="grid grid-cols-2 gap-1.5">
+			{#each handPresets as p (p.id)}
+				<button
+					onclick={() => addPreset(p)}
+					class="rounded-lg border border-border bg-surface-2 px-3 py-2 text-left text-[13px] text-text transition-colors hover:border-border-strong hover:bg-surface-3"
+				>
+					{p.name}
+				</button>
+			{/each}
 		</div>
 	</div>
 </Modal>

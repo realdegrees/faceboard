@@ -96,13 +96,26 @@
 				{#if phoneHost.error}
 					<p class="mt-1 text-[11px] text-red-400/90">{phoneHost.error}</p>
 				{/if}
-				<div class="mt-3 flex gap-2">
+				{#if phoneHost.state === 'connected' && (phoneHost.peerFacing || phoneHost.peerOrientation)}
+					<p class="mt-2 text-[11px] text-faint">
+						Phone: {phoneHost.peerFacing === 'environment' ? 'back' : 'front'} camera{phoneHost.peerOrientation
+							? ` · ${phoneHost.peerOrientation}`
+							: ''}
+					</p>
+				{/if}
+				<div class="mt-3 flex flex-wrap gap-2">
 					{#if phoneHost.state === 'connected'}
 						<button
 							onclick={() => phoneHost.flipCamera()}
 							class="rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[12px] text-muted transition-colors hover:text-text"
 						>
 							Flip camera
+						</button>
+						<button
+							onclick={() => phoneHost.rotate()}
+							class="rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[12px] text-muted transition-colors hover:text-text"
+						>
+							Rotate 90°
 						</button>
 					{/if}
 					<button

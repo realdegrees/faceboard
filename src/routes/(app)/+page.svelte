@@ -22,8 +22,13 @@
 	});
 
 	const onPhone = $derived(engine.source === 'phone');
-	const showCameraControls = $derived(engine.devices.length > 1 || onPhone);
+	const showCameraControls = $derived(engine.cameraOn || onPhone);
 	const cameraValue = $derived(onPhone ? 'phone' : (general.cameraDeviceId ?? ''));
+
+	function rotate() {
+		if (engine.source === 'phone') phoneHost.rotate();
+		else engine.rotation = (engine.rotation + 90) % 360;
+	}
 
 	const topShapes = $derived.by(() => {
 		const bs = engine.face?.blendshapes;
@@ -87,7 +92,7 @@
 	<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
 		<!-- Camera -->
 		<div class="lg:col-span-2 rounded-card border border-border bg-surface-1 p-4">
-			<div class="relative aspect-video w-full">
+			<div class="relative w-full">
 				{#key latestFireTs}
 					{#if latestFireTs}
 						<div
@@ -100,7 +105,7 @@
 					<CameraPreview />
 				{:else}
 					<div
-						class="grid h-full w-full place-items-center rounded-lg border border-dashed border-border-strong bg-surface-2 text-center text-[13px] text-faint"
+						class="grid aspect-video w-full place-items-center rounded-lg border border-dashed border-border-strong bg-surface-2 text-center text-[13px] text-faint"
 					>
 						{#if engine.status === 'error'}
 							<div class="px-6">
@@ -132,6 +137,13 @@
 				</div>
 				{#if showCameraControls}
 					<div class="flex items-center gap-2">
+						<button
+							onclick={rotate}
+							aria-label="Rotate"
+							class="grid h-7 w-7 place-items-center rounded-md border border-border bg-surface-2 text-muted transition-colors hover:text-text"
+						>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" /><path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" /></svg>
+						</button>
 						{#if onPhone}
 							<button
 								onclick={() => phoneHost.flipCamera()}
@@ -140,19 +152,21 @@
 								Flip
 							</button>
 						{/if}
-						<select
-							class="rounded-md border border-border bg-surface-2 px-2 py-1 text-[12px] text-muted outline-none focus:border-border-strong"
-							value={cameraValue}
-							onchange={onPickCamera}
-						>
-							<option value="">Default camera</option>
-							{#each engine.devices as d (d.deviceId)}
-								<option value={d.deviceId}>{d.label}</option>
-							{/each}
-							{#if onPhone}
-								<option value="phone">Phone camera</option>
-							{/if}
-						</select>
+						{#if engine.devices.length > 1 || onPhone}
+							<select
+								class="rounded-md border border-border bg-surface-2 px-2 py-1 text-[12px] text-muted outline-none focus:border-border-strong"
+								value={cameraValue}
+								onchange={onPickCamera}
+							>
+								<option value="">Default camera</option>
+								{#each engine.devices as d (d.deviceId)}
+									<option value={d.deviceId}>{d.label}</option>
+								{/each}
+								{#if onPhone}
+									<option value="phone">Phone camera</option>
+								{/if}
+							</select>
+						{/if}
 					</div>
 				{/if}
 			</div>

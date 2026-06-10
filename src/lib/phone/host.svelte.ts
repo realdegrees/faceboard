@@ -7,9 +7,12 @@ import { Signaling } from './signaling';
 export type HostState = 'idle' | 'starting' | 'waiting' | 'connecting' | 'connected' | 'error';
 
 interface RtcSignal {
-	type: 'offer' | 'answer' | 'candidate';
+	type: 'offer' | 'answer' | 'candidate' | 'flip' | 'rotate' | 'meta';
 	sdp?: RTCSessionDescriptionInit;
 	candidate?: RTCIceCandidateInit;
+	facing?: 'user' | 'environment';
+	orientation?: 'portrait' | 'landscape';
+	rotation?: number;
 }
 
 /**
@@ -21,6 +24,9 @@ class PhoneHost {
 	state = $state<HostState>('idle');
 	error = $state<string | null>(null);
 	info = $state<LanInfo | null>(null);
+	/** Reported by the phone for display. */
+	peerFacing = $state<'user' | 'environment' | null>(null);
+	peerOrientation = $state<'portrait' | 'landscape' | null>(null);
 
 	#sig: Signaling | null = null;
 	#pc: RTCPeerConnection | null = null;
@@ -76,12 +82,24 @@ class PhoneHost {
 	}
 
 	async #onSignal(signal: RtcSignal): Promise<void> {
+		// Control + metadata messages from the phone.
+		if (signal.type === 'meta') {
+			if (signal.facing) this.peerFacing = signal.facing;
+			if (signal.orientation) this.peerOrientation = signal.orientation;
+			return;
+		}
+		if (signal.type === 'rotate') {
+			this.rotate();
+			return;
+		}
+
 		const pc = this.#ensurePc();
 		if (signal.type === 'offer' && signal.sdp) {
 			await pc.setRemoteDescription(signal.sdp);
 			const answer = await pc.createAnswer();
 			await pc.setLocalDescription(answer);
 			this.#sig?.send({ type: 'answer', sdp: pc.localDescription ?? undefined });
+			this.#sig?.send({ type: 'meta', rotation: engine.rotation });
 		} else if (signal.type === 'candidate' && signal.candidate) {
 			try {
 				await pc.addIceCandidate(signal.candidate);
@@ -93,7 +111,13 @@ class PhoneHost {
 
 	/** Ask the paired phone to switch between its front and back camera. */
 	flipCamera(): void {
-		this.#sig?.send({ type: 'control', action: 'flip' });
+		this.#sig?.send({ type: 'flip' });
+	}
+
+	/** Rotate the desktop preview + detection 90° and tell the phone (display). */
+	rotate(): void {
+		engine.rotation = (engine.rotation + 90) % 360;
+		this.#sig?.send({ type: 'meta', rotation: engine.rotation });
 	}
 
 	#teardownPc(): void {

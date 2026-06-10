@@ -2,7 +2,10 @@
 	import { goto } from '$app/navigation';
 	import { app } from '$lib/stores/app.svelte';
 	import { runtime } from '$lib/triggers/runtime.svelte';
+	import { getPreset } from '$lib/triggers/presets';
+	import { PRESET_HAND_POSES } from '$lib/triggers/handPoses';
 	import EditFaceDialog from './EditFaceDialog.svelte';
+	import HandSkeleton from './HandSkeleton.svelte';
 	import type { Trigger } from '$lib/types';
 
 	let { trigger }: { trigger: Trigger } = $props();
@@ -12,6 +15,18 @@
 	const sounds = $derived(app.settings.sounds);
 	// Custom face expressions use the region-weighted model and are editable.
 	const editable = $derived(trigger.modality === 'face' && trigger.kind === 'custom' && !!trigger.regions);
+
+	// Hand-pose skeleton frames: canonical pose for presets, captured for custom.
+	const handFrames = $derived.by<number[][] | null>(() => {
+		if (trigger.modality !== 'hand') return null;
+		if (trigger.kind === 'builtin') {
+			const preset = getPreset(trigger.builtinId);
+			const pose = preset && preset.kind === 'hand-gesture' ? PRESET_HAND_POSES[preset.gesture] : null;
+			return pose ? [pose] : null;
+		}
+		if (trigger.motion === 'dynamic') return trigger.sequences?.length ? trigger.sequences[0] : null;
+		return trigger.samples?.length ? [trigger.samples[0]] : null;
+	});
 
 	let editing = $state(false);
 
@@ -40,13 +55,15 @@
 		: 'border-border'}"
 >
 	<div class="flex items-center gap-3">
-		<span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-surface-2 text-faint">
-			{#if trigger.modality === 'face'}
+		{#if trigger.modality === 'hand' && handFrames}
+			<div class="shrink-0">
+				<HandSkeleton frames={handFrames} size={64} />
+			</div>
+		{:else}
+			<span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-surface-2 text-faint">
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5c1 1.2 2.2 1.8 3.5 1.8s2.5-.6 3.5-1.8" /><path d="M9 9.5h.01M15 9.5h.01" /></svg>
-			{:else}
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11V6.5a1.5 1.5 0 0 1 3 0V11" /><path d="M10 11V5a1.5 1.5 0 0 1 3 0v6" /><path d="M13 11V6.5a1.5 1.5 0 0 1 3 0V12" /><path d="M16 8.5a1.5 1.5 0 0 1 3 0V14a6 6 0 0 1-6 6h-1.5a5 5 0 0 1-4-2l-2.5-3.3a1.5 1.5 0 0 1 2.3-1.9L7 14" /></svg>
-			{/if}
-		</span>
+			</span>
+		{/if}
 
 		<div class="min-w-0 flex-1">
 			<div class="flex items-center gap-2">

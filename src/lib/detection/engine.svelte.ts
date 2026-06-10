@@ -52,6 +52,8 @@ class DetectionEngine {
 	source = $state<'local' | 'phone'>('local');
 	/** Adaptive low-light boost on the detection input. */
 	enhance = $state(true);
+	/** Display + detection rotation in degrees (0/90/180/270) for sideways feeds. */
+	rotation = $state(0);
 
 	/** Hook for the matching engine. */
 	onFrame: ((frame: DetectionFrame) => void) | null = null;
@@ -219,7 +221,7 @@ class DetectionEngine {
 		const ts = Math.max(performance.now(), this.#lastTs + 1);
 		this.#lastTs = ts;
 
-		const input = this.enhance ? this.#preprocess(v) : v;
+		const input = this.enhance || this.rotation ? this.#preprocess(v) : v;
 		let frame: DetectionFrame;
 		try {
 			frame = this.#detector.detect(input, ts, this.modalities);
@@ -244,19 +246,26 @@ class DetectionEngine {
 	/** Draw the frame to an offscreen canvas with an adaptive brightness/contrast
 	 * boost so the detector sees a clearer image in low light. */
 	#preprocess(video: HTMLVideoElement): HTMLCanvasElement {
-		const w = video.videoWidth || 640;
-		const h = video.videoHeight || 480;
+		const r = ((this.rotation % 360) + 360) % 360;
+		const swap = r === 90 || r === 270;
+		const fw = video.videoWidth || 640;
+		const fh = video.videoHeight || 480;
+		const cw = swap ? fh : fw;
+		const ch = swap ? fw : fh;
 		const canvas = (this.#procCanvas ??= document.createElement('canvas'));
-		if (canvas.width !== w || canvas.height !== h) {
-			canvas.width = w;
-			canvas.height = h;
-		}
+		if (canvas.width !== cw) canvas.width = cw;
+		if (canvas.height !== ch) canvas.height = ch;
 		const ctx = canvas.getContext('2d');
 		if (!ctx) return canvas;
-		if (this.#sampleTick++ % 12 === 0) this.#adaptExposure(video);
-		ctx.filter = `brightness(${this.#brightness.toFixed(2)}) contrast(${this.#contrast.toFixed(2)}) saturate(1.04)`;
-		ctx.drawImage(video, 0, 0, w, h);
-		ctx.filter = 'none';
+		if (this.enhance && this.#sampleTick++ % 12 === 0) this.#adaptExposure(video);
+		ctx.save();
+		ctx.filter = this.enhance
+			? `brightness(${this.#brightness.toFixed(2)}) contrast(${this.#contrast.toFixed(2)}) saturate(1.04)`
+			: 'none';
+		ctx.translate(cw / 2, ch / 2);
+		if (r) ctx.rotate((r * Math.PI) / 180);
+		ctx.drawImage(video, -fw / 2, -fh / 2, fw, fh);
+		ctx.restore();
 		return canvas;
 	}
 

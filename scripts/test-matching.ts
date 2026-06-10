@@ -49,12 +49,6 @@ function hand(gesture: string | null, score = 0.9, tf: [number, number, number] 
 
 const smileBs = { mouthSmileLeft: 0.9, mouthSmileRight: 0.88, jawOpen: 0.05 };
 
-// --- builtin face ---
-const smile = mkTrigger({ builtinId: 'smile', threshold: 0.45 });
-assert(scoreTrigger(smile, frameFace(smileBs)) > 0.8, 'builtin smile scores high on a smile');
-assert(scoreTrigger(smile, frameFace({})) === 0, 'builtin smile scores 0 on neutral');
-assert(scoreTrigger(smile, { tsMs: 0, face: null, hands: [] }) === 0, 'builtin face scores 0 with no face');
-
 // --- builtin hand ---
 const thumb = mkTrigger({ modality: 'hand', builtinId: 'thumb-up', threshold: 0.5 });
 assert(approx(scoreTrigger(thumb, { tsMs: 0, face: null, hands: [hand('Thumb_Up', 0.8)] }), 0.8), 'builtin hand returns gesture confidence');
