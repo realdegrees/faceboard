@@ -10,6 +10,7 @@ import { engine } from './engine.svelte';
  */
 export async function startDetection(): Promise<void> {
 	engine.targetFps = app.settings.general.detectionFps;
+	engine.enhance = app.settings.general.enhanceLowLight;
 	engine.modalities = neededModalities(app.settings.triggers);
 	await engine.startLocal(app.settings.general.cameraDeviceId);
 	getBridge()?.detection.notifyState(engine.active);

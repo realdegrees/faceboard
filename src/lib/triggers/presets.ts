@@ -28,17 +28,18 @@ const avg = (...xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.leng
 
 export const PRESETS: Preset[] = [
 	// --- Facial expressions (blendshape rules) ---------------------------
-	{ id: 'smile', name: 'Smile', modality: 'face', kind: 'face-rule', defaultThreshold: 0.45,
+	{ id: 'smile', name: 'Smile', modality: 'face', kind: 'face-rule', defaultThreshold: 0.4,
 		score: (bs) => avg(g(bs, 'mouthSmileLeft'), g(bs, 'mouthSmileRight')) },
 	{ id: 'mouth-open', name: 'Mouth Open', modality: 'face', kind: 'face-rule', defaultThreshold: 0.5,
 		score: (bs) => g(bs, 'jawOpen') },
 	{ id: 'surprise', name: 'Surprise', modality: 'face', kind: 'face-rule', defaultThreshold: 0.4,
 		score: (bs) => Math.min(g(bs, 'jawOpen'), avg(g(bs, 'browInnerUp'), g(bs, 'browOuterUpLeft'), g(bs, 'browOuterUpRight'))) },
-	{ id: 'brows-up', name: 'Eyebrows Raised', modality: 'face', kind: 'face-rule', defaultThreshold: 0.45,
+	{ id: 'brows-up', name: 'Eyebrows Raised', modality: 'face', kind: 'face-rule', defaultThreshold: 0.4,
 		score: (bs) => avg(g(bs, 'browInnerUp'), g(bs, 'browOuterUpLeft'), g(bs, 'browOuterUpRight')) },
-	{ id: 'frown', name: 'Frown', modality: 'face', kind: 'face-rule', defaultThreshold: 0.4,
-		score: (bs) => avg(g(bs, 'mouthFrownLeft'), g(bs, 'mouthFrownRight')) },
-	{ id: 'pucker', name: 'Kiss / Pucker', modality: 'face', kind: 'face-rule', defaultThreshold: 0.5,
+	// Frown reads weakly as mouthFrown alone, so also accept a furrowed brow.
+	{ id: 'frown', name: 'Frown', modality: 'face', kind: 'face-rule', defaultThreshold: 0.3,
+		score: (bs) => Math.max(avg(g(bs, 'mouthFrownLeft'), g(bs, 'mouthFrownRight')), avg(g(bs, 'browDownLeft'), g(bs, 'browDownRight'))) },
+	{ id: 'pucker', name: 'Kiss / Pucker', modality: 'face', kind: 'face-rule', defaultThreshold: 0.45,
 		score: (bs) => g(bs, 'mouthPucker') },
 	{ id: 'cheek-puff', name: 'Cheek Puff', modality: 'face', kind: 'face-rule', defaultThreshold: 0.4,
 		score: (bs) => g(bs, 'cheekPuff') },

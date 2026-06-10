@@ -4,8 +4,13 @@
 	import { startDetection, stopDetection, toggleDetection } from '$lib/detection/control';
 	import { app } from '$lib/stores/app.svelte';
 	import { runtime } from '$lib/triggers/runtime.svelte';
+	import { phoneHost } from '$lib/phone/host.svelte';
 
 	const general = $derived(app.settings.general);
+
+	const onPhone = $derived(engine.source === 'phone');
+	const showCameraControls = $derived(engine.devices.length > 1 || onPhone);
+	const cameraValue = $derived(onPhone ? 'phone' : (general.cameraDeviceId ?? ''));
 
 	const topShapes = $derived.by(() => {
 		const bs = engine.face?.blendshapes;
@@ -23,12 +28,15 @@
 		app.settings.triggers.filter((t) => runtime.activeIds.includes(t.id))
 	);
 
-	function onPickCamera(e: Event) {
-		const id = (e.target as HTMLSelectElement).value || null;
-		app.setGeneral({ cameraDeviceId: id });
-		if (engine.active) {
+	async function onPickCamera(e: Event) {
+		const val = (e.target as HTMLSelectElement).value;
+		if (val === 'phone') return; // pair a phone from Settings → Phone camera
+		const wasRunning = engine.active || onPhone;
+		if (engine.source === 'phone') await phoneHost.stop();
+		app.setGeneral({ cameraDeviceId: val || null });
+		if (wasRunning) {
 			stopDetection();
-			void startDetection();
+			await startDetection();
 		}
 	}
 
@@ -104,17 +112,30 @@
 						<span class="text-faint">· {app.settings.triggers.length} triggers</span>
 					{/if}
 				</div>
-				{#if engine.devices.length > 1}
-					<select
-						class="rounded-md border border-border bg-surface-2 px-2 py-1 text-[12px] text-muted outline-none focus:border-border-strong"
-						value={general.cameraDeviceId ?? ''}
-						onchange={onPickCamera}
-					>
-						<option value="">Default camera</option>
-						{#each engine.devices as d (d.deviceId)}
-							<option value={d.deviceId}>{d.label}</option>
-						{/each}
-					</select>
+				{#if showCameraControls}
+					<div class="flex items-center gap-2">
+						{#if onPhone}
+							<button
+								onclick={() => phoneHost.flipCamera()}
+								class="rounded-md border border-border bg-surface-2 px-2 py-1 text-[12px] text-muted transition-colors hover:text-text"
+							>
+								Flip
+							</button>
+						{/if}
+						<select
+							class="rounded-md border border-border bg-surface-2 px-2 py-1 text-[12px] text-muted outline-none focus:border-border-strong"
+							value={cameraValue}
+							onchange={onPickCamera}
+						>
+							<option value="">Default camera</option>
+							{#each engine.devices as d (d.deviceId)}
+								<option value={d.deviceId}>{d.label}</option>
+							{/each}
+							{#if onPhone}
+								<option value="phone">Phone camera</option>
+							{/if}
+						</select>
+					</div>
 				{/if}
 			</div>
 		</div>

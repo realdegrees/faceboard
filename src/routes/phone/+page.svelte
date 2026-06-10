@@ -15,9 +15,10 @@
 	let sender: RTCRtpSender | null = null;
 
 	interface RtcSignal {
-		type: 'offer' | 'answer' | 'candidate';
+		type: 'offer' | 'answer' | 'candidate' | 'control';
 		sdp?: RTCSessionDescriptionInit;
 		candidate?: RTCIceCandidateInit;
+		action?: string;
 	}
 
 	onMount(() => {
@@ -28,6 +29,10 @@
 		sig.onPeerJoined = () => void startStreaming();
 		sig.onSignal = async (raw) => {
 			const p = raw as RtcSignal;
+			if (p.type === 'control') {
+				if (p.action === 'flip') void flip();
+				return;
+			}
 			if (!pc) return;
 			if (p.type === 'answer' && p.sdp) await pc.setRemoteDescription(p.sdp);
 			else if (p.type === 'candidate' && p.candidate) {

@@ -91,6 +91,11 @@ class PhoneHost {
 		}
 	}
 
+	/** Ask the paired phone to switch between its front and back camera. */
+	flipCamera(): void {
+		this.#sig?.send({ type: 'control', action: 'flip' });
+	}
+
 	#teardownPc(): void {
 		this.#pc?.close();
 		this.#pc = null;

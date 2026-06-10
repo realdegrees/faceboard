@@ -1,22 +1,26 @@
 <script lang="ts">
+	import { DrawingUtils, FaceLandmarker, GestureRecognizer } from '@mediapipe/tasks-vision';
 	import { engine } from '$lib/detection/engine.svelte';
 	import { app } from '$lib/stores/app.svelte';
 
 	// Mirror the whole preview (video + overlay together) so landmarks stay aligned.
 	const mirror = $derived(app.settings.general.mirror);
 
-	// Standard MediaPipe 21-point hand skeleton.
-	const HAND_CONNECTIONS: [number, number][] = [
-		[0, 1], [1, 2], [2, 3], [3, 4],
-		[0, 5], [5, 6], [6, 7], [7, 8],
-		[5, 9], [9, 10], [10, 11], [11, 12],
-		[9, 13], [13, 14], [14, 15], [15, 16],
-		[13, 17], [17, 18], [18, 19], [19, 20],
-		[0, 17]
-	];
-
 	let videoEl = $state<HTMLVideoElement>();
 	let canvasEl = $state<HTMLCanvasElement>();
+
+	let drawer: DrawingUtils | null = null;
+	let drawerCtx: CanvasRenderingContext2D | null = null;
+	function getDrawer(ctx: CanvasRenderingContext2D): DrawingUtils {
+		if (drawerCtx !== ctx) {
+			drawer = new DrawingUtils(ctx);
+			drawerCtx = ctx;
+		}
+		return drawer!;
+	}
+
+	const ACCENT = 'rgba(124,199,255,';
+	const LIGHT = 'rgba(237,237,240,';
 
 	// Plumb the engine's MediaStream into the visible preview element. srcObject
 	// can't be set declaratively, so this DOM write lives in an effect.
@@ -32,9 +36,10 @@
 		}
 	});
 
-	// Redraw the hand-landmark overlay whenever a new frame lands.
+	// Redraw the face mesh + hand skeleton overlay whenever a new frame lands.
 	$effect(() => {
 		const c = canvasEl;
+		const face = engine.face;
 		const hands = engine.hands;
 		if (!c) return;
 		const ctx = c.getContext('2d');
@@ -42,22 +47,24 @@
 		const w = (c.width = c.clientWidth);
 		const h = (c.height = c.clientHeight);
 		ctx.clearRect(0, 0, w, h);
-		ctx.strokeStyle = 'rgba(124,199,255,0.85)';
-		ctx.fillStyle = 'rgba(124,199,255,0.95)';
-		ctx.lineWidth = 2;
+		const du = getDrawer(ctx);
+
+		if (face?.landmarks?.length) {
+			const F = FaceLandmarker;
+			du.drawConnectors(face.landmarks, F.FACE_LANDMARKS_TESSELATION, { color: ACCENT + '0.16)', lineWidth: 0.5 });
+			du.drawConnectors(face.landmarks, F.FACE_LANDMARKS_FACE_OVAL, { color: LIGHT + '0.5)', lineWidth: 1.2 });
+			du.drawConnectors(face.landmarks, F.FACE_LANDMARKS_LIPS, { color: ACCENT + '0.85)', lineWidth: 1.4 });
+			du.drawConnectors(face.landmarks, F.FACE_LANDMARKS_LEFT_EYE, { color: LIGHT + '0.7)', lineWidth: 1.1 });
+			du.drawConnectors(face.landmarks, F.FACE_LANDMARKS_RIGHT_EYE, { color: LIGHT + '0.7)', lineWidth: 1.1 });
+			du.drawConnectors(face.landmarks, F.FACE_LANDMARKS_LEFT_EYEBROW, { color: LIGHT + '0.6)', lineWidth: 1.1 });
+			du.drawConnectors(face.landmarks, F.FACE_LANDMARKS_RIGHT_EYEBROW, { color: LIGHT + '0.6)', lineWidth: 1.1 });
+			du.drawConnectors(face.landmarks, F.FACE_LANDMARKS_LEFT_IRIS, { color: ACCENT + '0.9)', lineWidth: 1.2 });
+			du.drawConnectors(face.landmarks, F.FACE_LANDMARKS_RIGHT_IRIS, { color: ACCENT + '0.9)', lineWidth: 1.2 });
+		}
+
 		for (const hand of hands) {
-			const pts = hand.landmarks;
-			for (const [a, b] of HAND_CONNECTIONS) {
-				ctx.beginPath();
-				ctx.moveTo(pts[a].x * w, pts[a].y * h);
-				ctx.lineTo(pts[b].x * w, pts[b].y * h);
-				ctx.stroke();
-			}
-			for (const p of pts) {
-				ctx.beginPath();
-				ctx.arc(p.x * w, p.y * h, 2.6, 0, Math.PI * 2);
-				ctx.fill();
-			}
+			du.drawConnectors(hand.landmarks, GestureRecognizer.HAND_CONNECTIONS, { color: ACCENT + '0.85)', lineWidth: 2.5 });
+			du.drawLandmarks(hand.landmarks, { color: LIGHT + '0.95)', fillColor: ACCENT + '0.9)', radius: 2.6, lineWidth: 1 });
 		}
 	});
 </script>

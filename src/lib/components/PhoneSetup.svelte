@@ -78,12 +78,22 @@
 				{#if phoneHost.error}
 					<p class="mt-1 text-[11px] text-red-400/90">{phoneHost.error}</p>
 				{/if}
-				<button
-					onclick={() => phoneHost.stop()}
-					class="mt-3 rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[12px] text-muted transition-colors hover:text-text"
-				>
-					Disconnect
-				</button>
+				<div class="mt-3 flex gap-2">
+					{#if phoneHost.state === 'connected'}
+						<button
+							onclick={() => phoneHost.flipCamera()}
+							class="rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[12px] text-muted transition-colors hover:text-text"
+						>
+							Flip camera
+						</button>
+					{/if}
+					<button
+						onclick={() => phoneHost.stop()}
+						class="rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-[12px] text-muted transition-colors hover:text-text"
+					>
+						Disconnect
+					</button>
+				</div>
 			</div>
 		</div>
 	{/if}

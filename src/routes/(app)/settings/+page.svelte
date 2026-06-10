@@ -72,6 +72,20 @@
 					</div>
 					<Toggle checked={general.mirror} onChange={(v) => app.setGeneral({ mirror: v })} label="Mirror" />
 				</div>
+				<div class="flex items-center justify-between gap-4 px-5 py-3.5">
+					<div>
+						<p class="text-[13px]">Low-light boost</p>
+						<p class="text-[11px] text-faint">Auto-brighten dark frames so detection works in dim rooms.</p>
+					</div>
+					<Toggle
+						checked={general.enhanceLowLight}
+						onChange={(v) => {
+							app.setGeneral({ enhanceLowLight: v });
+							engine.enhance = v;
+						}}
+						label="Low-light boost"
+					/>
+				</div>
 			</div>
 		</div>
 

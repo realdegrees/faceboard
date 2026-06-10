@@ -47,7 +47,11 @@ export class Detector {
 				outputFaceBlendshapes: true,
 				outputFacialTransformationMatrixes: false,
 				runningMode: 'VIDEO',
-				numFaces: 1
+				numFaces: 1,
+				// Looser thresholds so faces are picked up in poor lighting / at angles.
+				minFaceDetectionConfidence: 0.3,
+				minFacePresenceConfidence: 0.3,
+				minTrackingConfidence: 0.3
 			});
 		} catch (err) {
 			if (this.#delegate === 'GPU') {
@@ -63,7 +67,12 @@ export class Detector {
 			return await GestureRecognizer.createFromOptions(this.#vision!, {
 				baseOptions: { modelAssetPath: HAND_MODEL, delegate: this.#delegate },
 				runningMode: 'VIDEO',
-				numHands: 2
+				numHands: 2,
+				// Lower so hands are detected before all five fingers are clearly visible
+				// and in low light.
+				minHandDetectionConfidence: 0.3,
+				minHandPresenceConfidence: 0.3,
+				minTrackingConfidence: 0.3
 			});
 		} catch (err) {
 			if (this.#delegate === 'GPU') {
@@ -74,11 +83,15 @@ export class Detector {
 		}
 	}
 
-	detect(video: HTMLVideoElement, tsMs: number, modalities: ModalityFlags): DetectionFrame {
+	detect(
+		input: HTMLVideoElement | HTMLCanvasElement,
+		tsMs: number,
+		modalities: ModalityFlags
+	): DetectionFrame {
 		let face: FaceData | null = null;
 		let hands: HandData[] = [];
-		if (this.#face && modalities.face) face = toFace(this.#face.detectForVideo(video, tsMs));
-		if (this.#hand && modalities.hand) hands = toHands(this.#hand.recognizeForVideo(video, tsMs));
+		if (this.#face && modalities.face) face = toFace(this.#face.detectForVideo(input, tsMs));
+		if (this.#hand && modalities.hand) hands = toHands(this.#hand.recognizeForVideo(input, tsMs));
 		return { tsMs, face, hands };
 	}
 
@@ -91,13 +104,16 @@ export class Detector {
 }
 
 function toFace(result: FaceLandmarkerResult): FaceData | null {
-	const categories = result.faceBlendshapes?.[0]?.categories;
-	if (!categories || categories.length === 0) return null;
+	const landmarks = result.faceLandmarks?.[0];
+	if (!landmarks || landmarks.length === 0) return null;
 	const blendshapes: Record<string, number> = {};
-	for (const c of categories) {
+	for (const c of result.faceBlendshapes?.[0]?.categories ?? []) {
 		if (c.categoryName) blendshapes[c.categoryName] = c.score;
 	}
-	return { blendshapes };
+	return {
+		blendshapes,
+		landmarks: landmarks.map((p) => ({ x: p.x, y: p.y, z: p.z, visibility: p.visibility ?? 0 }))
+	};
 }
 
 function toHands(result: GestureRecognizerResult): HandData[] {
@@ -111,7 +127,7 @@ function toHands(result: GestureRecognizerResult): HandData[] {
 		hands.push({
 			handedness: result.handedness?.[i]?.[0]?.categoryName ?? 'Unknown',
 			gesture,
-			landmarks: result.landmarks[i].map((p) => ({ x: p.x, y: p.y, z: p.z }))
+			landmarks: result.landmarks[i].map((p) => ({ x: p.x, y: p.y, z: p.z, visibility: p.visibility ?? 0 }))
 		});
 	}
 	return hands;

@@ -25,6 +25,10 @@ class DetectionEngine {
 	stream = $state<MediaStream | null>(null);
 	targetFps = $state(18);
 	modalities = $state<ModalityFlags>({ face: true, hand: true });
+	/** Whether the active stream is the local webcam or a paired phone. */
+	source = $state<'local' | 'phone'>('local');
+	/** Adaptive low-light boost on the detection input. */
+	enhance = $state(true);
 
 	/** Hook for the matching engine (wired in a later milestone). */
 	onFrame: ((frame: DetectionFrame) => void) | null = null;
@@ -36,6 +40,13 @@ class DetectionEngine {
 	#lastTs = 0;
 	#frameCount = 0;
 	#fpsWindowStart = 0;
+
+	// Low-light preprocessing
+	#procCanvas: HTMLCanvasElement | null = null;
+	#sampleCanvas: HTMLCanvasElement | null = null;
+	#brightness = 1;
+	#contrast = 1;
+	#sampleTick = 0;
 
 	get active(): boolean {
 		return this.status === 'running';
@@ -67,6 +78,7 @@ class DetectionEngine {
 				audio: false
 			});
 			this.#external = false;
+			this.source = 'local';
 			await this.#useStream(stream);
 			await this.refreshDevices();
 			this.#startLoop();
@@ -85,6 +97,7 @@ class DetectionEngine {
 		try {
 			await this.#detector.init(this.modalities);
 			this.#external = true;
+			this.source = 'phone';
 			await this.#useStream(stream);
 			this.#startLoop();
 			this.status = 'running';
@@ -149,9 +162,10 @@ class DetectionEngine {
 		const ts = Math.max(performance.now(), this.#lastTs + 1);
 		this.#lastTs = ts;
 
+		const input = this.enhance ? this.#preprocess(v) : v;
 		let frame: DetectionFrame;
 		try {
-			frame = this.#detector.detect(v, ts, this.modalities);
+			frame = this.#detector.detect(input, ts, this.modalities);
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : String(err);
 			return;
@@ -167,6 +181,48 @@ class DetectionEngine {
 			this.fps = Math.round((this.#frameCount / elapsed) * 1000);
 			this.#frameCount = 0;
 			this.#fpsWindowStart = ts;
+		}
+	}
+
+	/** Draw the frame to an offscreen canvas with an adaptive brightness/contrast
+	 * boost so the detector sees a clearer image in low light. */
+	#preprocess(video: HTMLVideoElement): HTMLCanvasElement {
+		const w = video.videoWidth || 640;
+		const h = video.videoHeight || 480;
+		const canvas = (this.#procCanvas ??= document.createElement('canvas'));
+		if (canvas.width !== w || canvas.height !== h) {
+			canvas.width = w;
+			canvas.height = h;
+		}
+		const ctx = canvas.getContext('2d');
+		if (!ctx) return canvas;
+		if (this.#sampleTick++ % 12 === 0) this.#adaptExposure(video);
+		ctx.filter = `brightness(${this.#brightness.toFixed(2)}) contrast(${this.#contrast.toFixed(2)}) saturate(1.04)`;
+		ctx.drawImage(video, 0, 0, w, h);
+		ctx.filter = 'none';
+		return canvas;
+	}
+
+	#adaptExposure(video: HTMLVideoElement): void {
+		const s = (this.#sampleCanvas ??= document.createElement('canvas'));
+		s.width = 24;
+		s.height = 24;
+		const ctx = s.getContext('2d', { willReadFrequently: true });
+		if (!ctx) return;
+		try {
+			ctx.drawImage(video, 0, 0, 24, 24);
+			const data = ctx.getImageData(0, 0, 24, 24).data;
+			let sum = 0;
+			for (let i = 0; i < data.length; i += 4) {
+				sum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+			}
+			const meanLuma = sum / (data.length / 4) / 255;
+			const desired = meanLuma > 0.001 ? 0.5 / meanLuma : 1;
+			const clamped = Math.max(1, Math.min(2.3, desired));
+			this.#brightness += (clamped - this.#brightness) * 0.4;
+			this.#contrast = 1 + (this.#brightness - 1) * 0.35;
+		} catch {
+			/* not ready — skip */
 		}
 	}
 

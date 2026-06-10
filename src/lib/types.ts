@@ -50,6 +50,8 @@ export interface GeneralSettings {
 	/** Detection loop target rate. */
 	detectionFps: number;
 	mirror: boolean;
+	/** Adaptive brightness/contrast boost on the detection input for low light. */
+	enhanceLowLight: boolean;
 	startMinimized: boolean;
 	autostartDetection: boolean;
 	/** Hide to the tray (keep detecting) instead of quitting when the window closes. */
@@ -79,6 +81,7 @@ export function defaultSettings(): FaceboardSettings {
 			source: 'local',
 			detectionFps: 18,
 			mirror: true,
+			enhanceLowLight: true,
 			startMinimized: false,
 			autostartDetection: false,
 			closeToTray: true,

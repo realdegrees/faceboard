@@ -1,14 +1,21 @@
 // Shapes produced by the detection pipeline, consumed by the matching engine.
 
-export interface FaceData {
-	/** ARKit-style blendshape name -> coefficient in [0,1]. ~52 entries. */
-	blendshapes: Record<string, number>;
-}
-
-export interface HandPoint {
+export interface Point {
 	x: number;
 	y: number;
 	z: number;
+	/** Present so the array is assignable to MediaPipe's NormalizedLandmark[]. */
+	visibility: number;
+}
+
+/** Back-compat alias. */
+export type HandPoint = Point;
+
+export interface FaceData {
+	/** ARKit-style blendshape name -> coefficient in [0,1]. ~52 entries. */
+	blendshapes: Record<string, number>;
+	/** 478 face-mesh landmarks (normalized image space) for the preview overlay. */
+	landmarks: Point[];
 }
 
 export interface HandData {
