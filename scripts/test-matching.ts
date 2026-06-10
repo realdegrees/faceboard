@@ -3,6 +3,7 @@
 import { scoreTrigger } from '../src/lib/triggers/matcher';
 import {
 	faceVector,
+	expressionScore,
 	normalizeHand,
 	cosine,
 	orderHands,
@@ -14,8 +15,7 @@ import {
 	toTemplate,
 	DYN_LEN
 } from '../src/lib/triggers/features';
-import { regionMatch, getRegion, suggestRegions } from '../src/lib/triggers/regions';
-import type { DetectionFrame, FaceData, HandData, HandPoint } from '../src/lib/detection/types';
+import type { DetectionFrame, FaceData, HandData, HandPoint, HeadPose } from '../src/lib/detection/types';
 import type { Trigger } from '../src/lib/types';
 
 let failures = 0;
@@ -35,8 +35,8 @@ function mkTrigger(p: Partial<Trigger>): Trigger {
 		holdMs: 0, cooldownMs: 0, soundId: null, enabled: true, createdAt: 0, ...p
 	};
 }
-const faceData = (bs: Record<string, number>): FaceData => ({ blendshapes: bs });
-const frameFace = (bs: Record<string, number>): DetectionFrame => ({ tsMs: 0, face: faceData(bs), hands: [] });
+const faceData = (bs: Record<string, number>, headPose?: HeadPose): FaceData => ({ blendshapes: bs, landmarks: [], headPose });
+const frameFace = (bs: Record<string, number>, headPose?: HeadPose): DetectionFrame => ({ tsMs: 0, face: faceData(bs, headPose), hands: [] });
 
 // 21-point synthetic hand
 const BASE: number[][] = Array.from({ length: 21 }, (_, i) => [(i % 5) * 0.1, Math.floor(i / 5) * 0.1, i * 0.005]);
@@ -111,31 +111,37 @@ const dRev = dtw(tmpl, toTemplate(moveSeq(0.8, 0.2, 24))); // reversed motion
 assert(dSame < dRev, 'dtw: same motion closer than reversed motion');
 assert(dSame < 0.15, 'dtw: position-shifted + speed-varied motion is a strong match');
 
-// --- face region-weighted single-capture matching ---
-const kissBrows = faceVector(faceData({ mouthPucker: 0.85, browOuterUpLeft: 0.7, browDownRight: 0.7 }));
-const mouthRegion = getRegion('mouth')!;
-assert(regionMatch(kissBrows, kissBrows, mouthRegion) > 0.99, 'regionMatch: identical mouth region = 1');
-assert(regionMatch(faceVector(faceData({})), kissBrows, mouthRegion) < 0.5, 'regionMatch: neutral vs kiss mouth is low');
+// --- neutral-relative expression matching ---
+// Resting face already has a slight smile; the captured expression is a big smile.
+const neutralBs = { mouthSmileLeft: 0.1, mouthSmileRight: 0.1 };
+const neutral = faceVector(faceData(neutralBs));
+const bigSmile = { mouthSmileLeft: 0.85, mouthSmileRight: 0.8 };
+const smileTarget = faceVector(faceData(bigSmile));
 
-const suggested = suggestRegions(kissBrows);
-assert(
-	suggested.includes('mouth') && suggested.includes('brow-left') && suggested.includes('brow-right'),
-	'suggestRegions picks mouth + both brows'
-);
-assert(!suggested.includes('cheeks'), 'suggestRegions ignores inactive cheeks');
+// expressionScore unit behaviour
+assert(expressionScore(faceData(bigSmile), smileTarget, neutral, undefined, false) > 0.9, 'identical expression (delta) matches');
+assert(expressionScore(faceData(neutralBs), smileTarget, neutral, undefined, false) < 0.2, 'resting face does NOT match (neutral subtracted)');
+assert(expressionScore(faceData({ mouthSmileLeft: 0.5, mouthSmileRight: 0.45 }), smileTarget, neutral, undefined, false) > 0.7, 'a softer smile still matches (intensity-invariant)');
+assert(expressionScore(faceData({ mouthFrownLeft: 0.8, mouthFrownRight: 0.8 }), smileTarget, neutral, undefined, false) < 0.3, 'a different expression (frown) scores low');
 
-const faceTrig = mkTrigger({ modality: 'face', kind: 'custom', target: kissBrows, regions: ['brow-left', 'brow-right', 'mouth'], threshold: 0.7 });
-assert(scoreTrigger(faceTrig, frameFace({ mouthPucker: 0.85, browOuterUpLeft: 0.7, browDownRight: 0.7 })) > 0.85, 'face region trigger matches the captured expression');
-assert(scoreTrigger(faceTrig, frameFace({ mouthPucker: 0.85, browOuterUpLeft: 0.7 })) < 0.7, 'face region trigger fails when one selected region (right brow) is off');
+// via scoreTrigger
+const smileTrig = mkTrigger({ modality: 'face', kind: 'custom', target: smileTarget, neutral, threshold: 0.6 });
+assert(scoreTrigger(smileTrig, frameFace(bigSmile)) > 0.9, 'face trigger matches the captured expression');
+assert(scoreTrigger(smileTrig, frameFace(neutralBs)) < 0.6, 'face trigger does not fire on the resting face');
 
-const mouthOnly = mkTrigger({ modality: 'face', kind: 'custom', target: faceVector(faceData({ mouthPucker: 0.85 })), regions: ['mouth'], threshold: 0.7 });
-assert(scoreTrigger(mouthOnly, frameFace({ mouthPucker: 0.85, browDownLeft: 0.9 })) > 0.85, 'unselected regions (brows) are ignored');
+// --- head pose toggle ---
+const poseFwd: HeadPose = { yaw: 2, pitch: 5, roll: 0 };
+const poseLeft: HeadPose = { yaw: 32, pitch: 5, roll: 0 };
+assert(scoreTrigger(smileTrig, frameFace(bigSmile, poseLeft)) > 0.9, 'head-pose-off trigger ignores head direction');
 
-// pattern/intensity invariance: a weaker version of the same expression still matches
-const smileTarget = faceVector(faceData({ mouthSmileLeft: 0.9, mouthSmileRight: 0.9 }));
-const smileTrig = mkTrigger({ modality: 'face', kind: 'custom', target: smileTarget, regions: ['mouth'], threshold: 0.8 });
-assert(scoreTrigger(smileTrig, frameFace({ mouthSmileLeft: 0.45, mouthSmileRight: 0.4 })) > 0.85, 'face match is intensity-invariant (a softer smile still matches)');
-assert(scoreTrigger(smileTrig, frameFace({})) === 0, 'relaxed face does not match an active expression');
+const smileLeftTrig = mkTrigger({ modality: 'face', kind: 'custom', target: smileTarget, neutral, headPose: poseLeft, useHeadPose: true, threshold: 0.6 });
+assert(scoreTrigger(smileLeftTrig, frameFace(bigSmile, poseLeft)) > 0.85, 'head-pose trigger matches expression + matching head direction');
+assert(scoreTrigger(smileLeftTrig, frameFace(bigSmile, poseFwd)) < 0.6, 'head-pose trigger fails when head direction is wrong');
+
+// pure head-pose trigger (look left, neutral expression)
+const lookLeftTrig = mkTrigger({ modality: 'face', kind: 'custom', target: neutral, neutral, headPose: poseLeft, useHeadPose: true, threshold: 0.6 });
+assert(scoreTrigger(lookLeftTrig, frameFace(neutralBs, poseLeft)) > 0.85, 'pure head-pose trigger fires on the captured head direction');
+assert(scoreTrigger(lookLeftTrig, frameFace(neutralBs, poseFwd)) < 0.5, 'pure head-pose trigger does not fire facing forward');
 
 console.log(failures === 0 ? 'ALL_PASS' : 'FAILURES=' + failures);
 process.exit(failures === 0 ? 0 : 1);

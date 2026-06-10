@@ -1,4 +1,4 @@
-import { BLENDSHAPE_NAMES, type FaceData, type HandData } from '../detection/types';
+import { BLENDSHAPE_NAMES, type FaceData, type HeadPose, type HandData } from '../detection/types';
 
 export function clamp01(x: number): number {
 	return x < 0 ? 0 : x > 1 ? 1 : x;
@@ -13,6 +13,67 @@ export function faceVector(face: FaceData): number[] {
 export function subtractNeutral(v: number[], neutral?: number[]): number[] {
 	if (!neutral) return v.slice();
 	return v.map((x, i) => Math.max(0, x - (neutral[i] ?? 0)));
+}
+
+function norm(v: number[]): number {
+	let s = 0;
+	for (const x of v) s += x * x;
+	return Math.sqrt(s);
+}
+
+/** Distance between two head poses in degrees (tilt weighted a little less than
+ *  turn/nod, since it's the least deliberate axis). */
+export function headPoseDistance(a: HeadPose, b: HeadPose): number {
+	const dy = a.yaw - b.yaw;
+	const dp = a.pitch - b.pitch;
+	const dr = (a.roll - b.roll) * 0.7;
+	return Math.sqrt(dy * dy + dp * dp + dr * dr);
+}
+
+// Tunables for expression matching.
+const EXPR_FLOOR = 0.12; // min target delta magnitude to count as a real expression
+const STRENGTH_FRAC = 0.55; // fraction of the captured strength needed for full score
+const POSE_TOL_DEG = 22; // head-pose match tolerance
+
+/**
+ * Neutral-relative expression match in [0,1]. The score is the *pattern* match
+ * (cosine of the activation delta vs neutral — which auto-weights by whatever
+ * muscles actually moved when captured) times the *strength* (how hard the
+ * expression is made), with an optional head-pose gate. A pure head-pose capture
+ * (no expression) scores on head pose alone. Lighting/face-shape differences fall
+ * out because everything is relative to the user's own neutral.
+ */
+export function expressionScore(
+	face: FaceData,
+	target: number[],
+	neutral: number[] | undefined | null,
+	headPoseTarget: HeadPose | undefined,
+	useHeadPose: boolean
+): number {
+	const cur = faceVector(face);
+	const n = neutral ?? [];
+	const liveDelta = cur.map((v, i) => Math.max(0, v - (n[i] ?? 0)));
+	const targetDelta = target.map((v, i) => Math.max(0, v - (n[i] ?? 0)));
+	const targetMag = norm(targetDelta);
+
+	let exprScore: number;
+	if (targetMag < EXPR_FLOOR) {
+		exprScore = 1; // no real expression captured -> a pure head-pose trigger
+	} else {
+		const liveMag = norm(liveDelta);
+		const strength = clamp01(liveMag / targetMag / STRENGTH_FRAC);
+		exprScore = clamp01(cosine(liveDelta, targetDelta) * strength);
+	}
+
+	if (useHeadPose && headPoseTarget) {
+		if (!face.headPose) return 0;
+		const poseScore = clamp01(1 - headPoseDistance(face.headPose, headPoseTarget) / POSE_TOL_DEG);
+		return clamp01(Math.min(exprScore, poseScore));
+	}
+	// A capture with neither a real expression nor a head-pose requirement matches
+	// any face — reject it rather than fire constantly.
+	if (targetMag < EXPR_FLOOR) return 0;
+	return exprScore;
 }
 
 /**

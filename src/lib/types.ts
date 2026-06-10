@@ -1,6 +1,8 @@
 // Core data model shared across the renderer. The Electron side persists this as
 // an opaque JSON document — the schema lives here, in the renderer.
 
+import type { HeadPose } from './detection/types';
+
 export type Modality = 'face' | 'hand';
 export type TriggerKind = 'builtin' | 'custom';
 
@@ -15,11 +17,18 @@ export interface Trigger {
 	samples?: number[][];
 	/** Optional neutral baseline subtracted before matching. */
 	neutral?: number[];
-	/** Custom face: single captured target blendshape vector. */
+	/** Custom face: captured expression blendshape vector (absolute). Matched as a
+	 *  delta from `neutral`. */
 	target?: number[];
-	/** Custom face: required region ids; each must match the threshold. */
+	/** Custom face: head orientation captured with the expression. Only matched
+	 *  when `useHeadPose` is on (e.g. "look left", tilt). */
+	headPose?: HeadPose;
+	/** Custom face: also require the captured head direction, not just the
+	 *  expression. Off by default — the expression matches at any head angle. */
+	useHeadPose?: boolean;
+	/** @deprecated region-weighted model — superseded by neutral-delta matching. */
 	regions?: string[];
-	/** Custom face: flattened captured 478×3 landmarks for the static mesh editor. */
+	/** @deprecated mesh editor — superseded by neutral-delta matching. */
 	meshLandmarks?: number[];
 	/** Hand triggers: number of hands the trigger uses (default 1). */
 	hands?: 1 | 2;
@@ -42,6 +51,15 @@ export interface Trigger {
 	/** 'once' = fire once per detection, re-arm only after the pose is released for
 	 *  cooldownMs. 'while-held' = repeat every cooldownMs while held. Default 'once'. */
 	retrigger?: 'once' | 'while-held';
+	/** 'once' = play the sound once on fire. 'while-active' = start the sound when
+	 *  the trigger goes active and stop it when it ends (looping). Default 'once'. */
+	playback?: 'once' | 'while-active';
+	/** Must be detected this many times in a row to fire (default 1). Each "try" is
+	 *  a full detection (hold included), and consecutive tries must fall within
+	 *  `repeatGraceMs` of each other or the count resets. */
+	repeatCount?: number;
+	/** Max gap (ms) between consecutive detections for the repeat counter. */
+	repeatGraceMs?: number;
 	/** Linked sound id, or null if unlinked. */
 	soundId: string | null;
 	enabled: boolean;
@@ -77,6 +95,9 @@ export interface GeneralSettings {
 	closeToTray: boolean;
 	/** Global multiplier applied to match scores (0.5..1.5). */
 	sensitivity: number;
+	/** Calibrated neutral (resting) face: blendshape baseline subtracted before
+	 *  expression matching. Captured once; reused by every expression trigger. */
+	faceNeutral?: number[] | null;
 }
 
 export interface FaceboardSettings {

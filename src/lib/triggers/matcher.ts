@@ -3,6 +3,7 @@ import type { DetectionFrame } from '../detection/types';
 import { getPreset } from './presets';
 import {
 	bestCosine,
+	expressionScore,
 	faceVector,
 	mirrorX,
 	normalizeStaticPose,
@@ -10,7 +11,6 @@ import {
 	pairwiseDescriptor,
 	subtractNeutral
 } from './features';
-import { getRegion, regionMatch } from './regions';
 
 /** Activation score in [0,1] for a trigger against one detection frame. */
 export function scoreTrigger(trigger: Trigger, frame: DetectionFrame): number {
@@ -36,21 +36,18 @@ function scoreBuiltin(trigger: Trigger, frame: DetectionFrame): number {
 function scoreCustom(trigger: Trigger, frame: DetectionFrame): number {
 	if (trigger.modality === 'face') {
 		if (!frame.face) return 0;
-		const cur = faceVector(frame.face);
-		// Region-weighted single-capture model: every selected region must match.
-		if (trigger.target && trigger.regions?.length) {
-			let min = 1;
-			for (const id of trigger.regions) {
-				const region = getRegion(id);
-				if (!region) continue;
-				const s = regionMatch(cur, trigger.target, region);
-				if (s < min) min = s;
-			}
-			return clampScore(min);
+		// Dynamic (motion) expressions are matched temporally in the runtime.
+		if (trigger.motion === 'dynamic') return 0;
+		// Neutral-relative expression match (auto-weighted by what moved), with an
+		// optional head-pose gate.
+		if (trigger.target) {
+			return clampScore(
+				expressionScore(frame.face, trigger.target, trigger.neutral, trigger.headPose, !!trigger.useHeadPose)
+			);
 		}
-		// Legacy few-shot fallback.
+		// Legacy few-shot fallback (older triggers).
 		if (trigger.samples?.length) {
-			const c = subtractNeutral(cur, trigger.neutral);
+			const c = subtractNeutral(faceVector(frame.face), trigger.neutral);
 			const refs = trigger.neutral
 				? trigger.samples.map((s) => subtractNeutral(s, trigger.neutral))
 				: trigger.samples;
