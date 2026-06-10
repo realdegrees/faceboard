@@ -4,7 +4,6 @@
 	import { runtime } from '$lib/triggers/runtime.svelte';
 	import { getPreset } from '$lib/triggers/presets';
 	import { PRESET_HAND_POSES } from '$lib/triggers/handPoses';
-	import EditFaceDialog from './EditFaceDialog.svelte';
 	import HandSkeleton from './HandSkeleton.svelte';
 	import type { Trigger } from '$lib/types';
 
@@ -13,8 +12,6 @@
 	const score = $derived(runtime.scores[trigger.id] ?? 0);
 	const active = $derived(runtime.activeIds.includes(trigger.id));
 	const sounds = $derived(app.settings.sounds);
-	// Custom face expressions use the region-weighted model and are editable.
-	const editable = $derived(trigger.modality === 'face' && trigger.kind === 'custom' && !!trigger.regions);
 
 	// Hand-pose skeleton frames: canonical pose for presets, captured for custom.
 	const handFrames = $derived.by<number[][] | null>(() => {
@@ -28,7 +25,19 @@
 		return trigger.samples?.length ? [trigger.samples[0]] : null;
 	});
 
-	let editing = $state(false);
+	function setPlayback(e: Event) {
+		app.updateTrigger(trigger.id, {
+			playback: (e.target as HTMLSelectElement).value as 'once' | 'while-active'
+		});
+	}
+	function setRepeat(e: Event) {
+		app.updateTrigger(trigger.id, {
+			repeatCount: Math.max(1, Math.round(+(e.target as HTMLInputElement).value || 1))
+		});
+	}
+	function setHeadPose(e: Event) {
+		app.updateTrigger(trigger.id, { useHeadPose: (e.target as HTMLSelectElement).value === 'on' });
+	}
 
 	function setThreshold(e: Event) {
 		app.updateTrigger(trigger.id, { threshold: +(e.target as HTMLInputElement).value });
@@ -66,6 +75,8 @@
 		trigger.modality === 'hand' && trigger.kind === 'custom' && trigger.motion !== 'dynamic'
 	);
 	const isHandCustom = $derived(trigger.modality === 'hand' && trigger.kind === 'custom');
+	const isFaceCustom = $derived(trigger.modality === 'face' && trigger.kind === 'custom');
+	const canHeadPose = $derived(isFaceCustom && !!trigger.headPose);
 </script>
 
 <div
@@ -116,16 +127,6 @@
 					: ''}"
 			></span>
 		</button>
-
-		{#if editable}
-			<button
-				onclick={() => (editing = true)}
-				aria-label="Edit"
-				class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-faint transition-colors hover:bg-surface-2 hover:text-text"
-			>
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" /></svg>
-			</button>
-		{/if}
 
 		<button
 			onclick={() => app.removeTrigger(trigger.id)}
@@ -242,9 +243,43 @@
 				</select>
 			</label>
 		{/if}
+
+		{#if canHeadPose}
+			<label class="flex flex-col gap-1">
+				<span class="text-[11px] text-faint">Head direction</span>
+				<select
+					value={trigger.useHeadPose ? 'on' : 'off'}
+					onchange={setHeadPose}
+					class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] text-muted outline-none focus:border-border-strong"
+				>
+					<option value="off">Any</option>
+					<option value="on">Must match</option>
+				</select>
+			</label>
+		{/if}
+
+		<label class="flex flex-col gap-1">
+			<span class="text-[11px] text-faint">Sound</span>
+			<select
+				value={trigger.playback ?? 'once'}
+				onchange={setPlayback}
+				class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] text-muted outline-none focus:border-border-strong"
+			>
+				<option value="once">Play once</option>
+				<option value="while-active">While active</option>
+			</select>
+		</label>
+
+		<label class="flex flex-col gap-1">
+			<span class="text-[11px] text-faint">Repeat ×</span>
+			<input
+				type="number"
+				min="1"
+				step="1"
+				value={trigger.repeatCount ?? 1}
+				oninput={setRepeat}
+				class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] outline-none focus:border-border-strong"
+			/>
+		</label>
 	</div>
 </div>
-
-{#if editing}
-	<EditFaceDialog {trigger} onClose={() => (editing = false)} />
-{/if}

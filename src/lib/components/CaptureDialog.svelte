@@ -10,10 +10,9 @@
 		orderHands,
 		toTemplate
 	} from '$lib/triggers/features';
-	import { suggestRegions } from '$lib/triggers/regions';
+	import type { HeadPose } from '$lib/detection/types';
 	import { newId, type Modality, type Trigger } from '$lib/types';
 	import CameraPreview from './CameraPreview.svelte';
-	import FaceRegionSelector from './FaceRegionSelector.svelte';
 	import Modal from './Modal.svelte';
 
 	let {
@@ -28,12 +27,13 @@
 
 	let name = $state('');
 
-	// Face (single capture + weighted regions)
+	// Face: one-time global neutral + a single expression snapshot, matched as a
+	// delta from neutral. Optionally also matches head direction.
 	let captured = $state(false);
 	let target = $state<number[] | null>(null);
-	let meshLandmarks = $state<number[] | null>(null);
-	let regions = $state<string[]>([]);
-	let faceThreshold = $state(0.72);
+	let capturedHeadPose = $state<HeadPose | null>(null);
+	let useHeadPose = $state(false);
+	const neutralSet = $derived(!!app.settings.general.faceNeutral?.length);
 
 	// Hand
 	let handCount = $state<1 | 2>(1);
@@ -72,15 +72,15 @@
 	);
 
 	// --- Face ---
+	function captureNeutral() {
+		if (!engine.face) return;
+		app.setGeneral({ faceNeutral: faceVector(engine.face).map(r4) });
+	}
 	function captureFace() {
 		if (!engine.face) return;
-		target = faceVector(engine.face);
-		meshLandmarks = engine.face.landmarks.flatMap((p) => [r4(p.x), r4(p.y), r4(p.z)]);
-		regions = suggestRegions(target);
+		target = faceVector(engine.face).map(r4);
+		capturedHeadPose = engine.face.headPose ? { ...engine.face.headPose } : null;
 		captured = true;
-	}
-	function toggleRegion(id: string) {
-		regions = regions.includes(id) ? regions.filter((r) => r !== id) : [...regions, id];
 	}
 
 	// --- Hand pose ---
@@ -138,7 +138,7 @@
 	const canSave = $derived(
 		name.trim().length > 0 &&
 			(modality === 'face'
-				? captured && regions.length >= 1
+				? captured && neutralSet
 				: isGesture
 					? takes.length >= 2
 					: samples.length >= 3)
@@ -165,12 +165,16 @@
 			createdAt: Date.now()
 		};
 		if (modality === 'face') {
+			const neutral = app.settings.general.faceNeutral;
 			onSaved({
 				...base,
+				motion: 'static',
 				target: $state.snapshot(target) as number[],
-				meshLandmarks: $state.snapshot(meshLandmarks) as number[],
-				regions: $state.snapshot(regions) as string[],
-				threshold: faceThreshold,
+				neutral: neutral ? ($state.snapshot(neutral) as number[]) : undefined,
+				// Always store the head pose so the toggle can be flipped later on the card.
+				headPose: capturedHeadPose ? ($state.snapshot(capturedHeadPose) as HeadPose) : undefined,
+				useHeadPose: useHeadPose && !!capturedHeadPose,
+				threshold: 0.55,
 				cooldownMs: 800
 			});
 		} else if (isGesture) {
@@ -252,11 +256,24 @@
 			</div>
 
 			{#if modality === 'face'}
-				{#if !captured}
+				{#if !neutralSet}
 					<div class="rounded-lg border border-border bg-surface-1 p-3">
-						<p class="mb-3 text-[12px] text-faint">
-							Make the expression and capture it once. Then highlight the face areas that define it.
+						<p class="mb-1 text-[12px] text-text">First, set your neutral face</p>
+						<p class="mb-3 text-[11px] text-faint">
+							Relax — no expression — and capture once. This baseline is reused for every expression,
+							so you only do it once.
 						</p>
+						<button
+							onclick={captureNeutral}
+							disabled={!present}
+							class="w-full rounded-md bg-accent/90 px-3 py-2 text-[12px] font-medium text-black transition-colors hover:bg-accent disabled:opacity-40"
+						>
+							Capture neutral face
+						</button>
+					</div>
+				{:else if !captured}
+					<div class="rounded-lg border border-border bg-surface-1 p-3">
+						<p class="mb-3 text-[12px] text-faint">Make the expression and capture it.</p>
 						<button
 							onclick={captureFace}
 							disabled={!present}
@@ -264,24 +281,36 @@
 						>
 							Capture expression
 						</button>
-					</div>
-				{:else}
-					<div class="rounded-lg border border-border bg-surface-1 p-3">
-						<p class="mb-2 text-[11px] text-faint">
-							Highlight the areas that must match (tap the mesh or the chips). Each highlighted area
-							has to match the threshold.
-						</p>
-						{#if meshLandmarks}
-							<FaceRegionSelector landmarks={meshLandmarks} selected={regions} onToggle={toggleRegion} />
-						{/if}
-						<button onclick={captureFace} class="mt-3 text-[11px] text-faint transition-colors hover:text-text">
-							Re-capture expression
+						<button
+							onclick={captureNeutral}
+							disabled={!present}
+							class="mt-2 text-[11px] text-faint transition-colors hover:text-text"
+						>
+							Re-set neutral face
 						</button>
 					</div>
-					<label class="flex flex-col gap-1">
-						<span class="text-[11px] text-faint">Match threshold · {faceThreshold.toFixed(2)}</span>
-						<input type="range" min="0.4" max="0.95" step="0.01" bind:value={faceThreshold} class="fb-range mt-1" />
-					</label>
+				{:else}
+					<div class="rounded-lg border border-accent/40 bg-accent/5 px-3 py-2.5 text-[12px] text-text">
+						Expression captured
+						<button onclick={captureFace} class="ml-2 text-[11px] text-faint transition-colors hover:text-text">
+							Re-capture
+						</button>
+					</div>
+					<div>
+						<button
+							onclick={() => (useHeadPose = !useHeadPose)}
+							class="rounded-full border px-2.5 py-1 text-[11px] transition-colors {useHeadPose
+								? 'border-accent/50 bg-accent/15 text-accent'
+								: 'border-border bg-surface-2 text-muted hover:text-text'}"
+						>
+							Also match head direction
+						</button>
+						<p class="mt-1.5 text-[11px] text-faint">
+							{useHeadPose
+								? 'Your head must be turned / tilted the same way too (e.g. looking left).'
+								: 'Matches the expression at any head angle. Turn on for "look left", head tilt, etc.'}
+						</p>
+					</div>
 				{/if}
 			{:else}
 				<div class="flex gap-3">
