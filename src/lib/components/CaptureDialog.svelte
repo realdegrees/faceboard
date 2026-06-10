@@ -42,9 +42,9 @@
 	onMount(() => {
 		void (async () => {
 			const mods = { face: modality === 'face', hand: modality === 'hand' };
-			if (!engine.active) {
+			if (!engine.detecting) {
 				engine.modalities = mods;
-				await engine.startLocal(app.settings.general.cameraDeviceId);
+				await engine.startDetection(app.settings.general.cameraDeviceId);
 			} else {
 				await engine.ensureModalities(mods);
 			}

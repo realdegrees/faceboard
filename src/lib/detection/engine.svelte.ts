@@ -1,23 +1,46 @@
 import { Detector, type ModalityFlags } from './mediapipe';
 import type { DetectionFrame, FaceData, HandData } from './types';
 
-export type EngineStatus = 'idle' | 'loading' | 'running' | 'error';
+export type EngineStatus = 'idle' | 'loading' | 'error';
 
 export interface CameraDevice {
 	deviceId: string;
 	label: string;
 }
 
+/** Friendlier message for common getUserMedia failures. */
+function cameraError(err: unknown): string {
+	const name = (err as { name?: string } | null)?.name;
+	switch (name) {
+		case 'NotFoundError':
+		case 'DevicesNotFoundError':
+			return 'No camera found.';
+		case 'NotAllowedError':
+		case 'PermissionDeniedError':
+			return 'Camera permission denied.';
+		case 'NotReadableError':
+		case 'TrackStartError':
+			return 'Camera is in use by another app.';
+		case 'OverconstrainedError':
+			return 'Selected camera is unavailable.';
+		default:
+			return err instanceof Error ? err.message : String(err);
+	}
+}
+
 /**
- * Long-lived detection engine. Owns an offscreen <video> fed by either a local
- * webcam or a remote (phone) MediaStream, and a setInterval-driven detection
- * loop. The loop uses setInterval (not requestAnimationFrame) plus the window's
- * `backgroundThrottling: false` so detection keeps running while minimized or in
- * the tray. It is a module singleton so navigating between routes never stops it.
+ * Long-lived engine. Owns an offscreen <video> fed by a local webcam or a paired
+ * phone stream. The **camera** (live preview + device list) is decoupled from
+ * **detection** (the MediaPipe loop): the camera can be on for preview without
+ * detection running. The loop uses setInterval + the window's
+ * `backgroundThrottling: false` so it keeps running while minimized / in the tray.
+ * It is a module singleton, so navigating between routes never stops it.
  */
 class DetectionEngine {
 	status = $state<EngineStatus>('idle');
 	error = $state<string | null>(null);
+	/** Detection loop (MediaPipe) is running. */
+	detecting = $state(false);
 	fps = $state(0);
 	face = $state<FaceData | null>(null);
 	hands = $state<HandData[]>([]);
@@ -30,7 +53,7 @@ class DetectionEngine {
 	/** Adaptive low-light boost on the detection input. */
 	enhance = $state(true);
 
-	/** Hook for the matching engine (wired in a later milestone). */
+	/** Hook for the matching engine. */
 	onFrame: ((frame: DetectionFrame) => void) | null = null;
 
 	#detector = new Detector();
@@ -48,8 +71,12 @@ class DetectionEngine {
 	#contrast = 1;
 	#sampleTick = 0;
 
+	/** Back-compat: "active" means detection is running. */
 	get active(): boolean {
-		return this.status === 'running';
+		return this.detecting;
+	}
+	get cameraOn(): boolean {
+		return this.stream !== null;
 	}
 
 	#ensureVideo(): HTMLVideoElement {
@@ -66,13 +93,13 @@ class DetectionEngine {
 		return v;
 	}
 
-	/** Start detection from a local webcam. */
-	async startLocal(deviceId?: string | null): Promise<void> {
-		if (this.status === 'loading' || this.status === 'running') return;
+	/** Turn the local webcam on for preview (no detection). Also used to switch
+	 *  the active camera; if detection is running it resumes on the new stream. */
+	async openCamera(deviceId?: string | null): Promise<void> {
+		if (this.status === 'loading') return;
 		this.status = 'loading';
 		this.error = null;
 		try {
-			await this.#detector.init(this.modalities);
 			const stream = await navigator.mediaDevices.getUserMedia({
 				video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'user' },
 				audio: false
@@ -81,13 +108,41 @@ class DetectionEngine {
 			this.source = 'local';
 			await this.#useStream(stream);
 			await this.refreshDevices();
-			this.#startLoop();
-			this.status = 'running';
+			this.status = 'idle';
+			if (this.detecting) this.#startLoop();
 		} catch (err) {
 			this.#teardownStream();
 			this.status = 'error';
+			this.error = cameraError(err);
+		}
+	}
+
+	/** Start the detection loop, opening the camera first if it isn't already on. */
+	async startDetection(deviceId?: string | null): Promise<void> {
+		if (!this.stream) {
+			await this.openCamera(deviceId);
+			if (!this.stream) return; // camera failed; error already set
+		}
+		this.status = 'loading';
+		try {
+			await this.#detector.init(this.modalities);
+			this.detecting = true;
+			this.#startLoop();
+			this.status = 'idle';
+		} catch (err) {
+			this.detecting = false;
+			this.status = 'error';
 			this.error = err instanceof Error ? err.message : String(err);
 		}
+	}
+
+	/** Stop the detection loop but keep the camera on for preview. */
+	stopDetection(): void {
+		this.#stopLoop();
+		this.detecting = false;
+		this.face = null;
+		this.hands = [];
+		this.fps = 0;
 	}
 
 	/** Start (or switch to) detection from an externally supplied stream (phone). */
@@ -99,9 +154,11 @@ class DetectionEngine {
 			this.#external = true;
 			this.source = 'phone';
 			await this.#useStream(stream);
+			this.detecting = true;
 			this.#startLoop();
-			this.status = 'running';
+			this.status = 'idle';
 		} catch (err) {
+			this.detecting = false;
 			this.status = 'error';
 			this.error = err instanceof Error ? err.message : String(err);
 		}
@@ -125,10 +182,10 @@ class DetectionEngine {
 	}
 
 	/** Ensure the given modalities are active, lazily creating detectors if the
-	 * engine is already running. */
+	 * loop is already running. */
 	async ensureModalities(modalities: ModalityFlags): Promise<void> {
 		this.modalities = modalities;
-		if (this.status === 'running') await this.#detector.init(modalities);
+		if (this.detecting) await this.#detector.init(modalities);
 	}
 
 	async refreshDevices(): Promise<void> {
@@ -234,13 +291,20 @@ class DetectionEngine {
 		if (this.#video) this.#video.srcObject = null;
 	}
 
-	stop(): void {
+	/** Stop everything: detection loop + camera. */
+	closeCamera(): void {
 		this.#stopLoop();
 		this.#teardownStream();
+		this.detecting = false;
 		this.face = null;
 		this.hands = [];
 		this.fps = 0;
 		if (this.status !== 'error') this.status = 'idle';
+	}
+
+	/** Back-compat alias. */
+	stop(): void {
+		this.closeCamera();
 	}
 }
 

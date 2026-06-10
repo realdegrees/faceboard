@@ -119,13 +119,15 @@
 						style={engine.active ? 'animation: fb-pulse 2s ease-in-out infinite;' : ''}
 					></span>
 					<span class={engine.active ? 'text-muted' : 'text-faint'}>
-						{engine.status === 'running'
+						{engine.detecting
 							? `Detection live · ${engine.fps} fps`
 							: engine.status === 'loading'
 								? 'Starting…'
 								: engine.status === 'error'
-									? 'Detection error'
-									: 'Detection idle'}
+									? 'Camera error'
+									: engine.cameraOn
+										? 'Camera on'
+										: 'Detection idle'}
 					</span>
 				</div>
 			</div>

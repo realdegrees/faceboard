@@ -13,6 +13,9 @@ const buildDir = path.join(__dirname, '..', 'build');
 const errors = [];
 
 app.whenReady().then(async () => {
+	require('electron').session.defaultSession.setPermissionRequestHandler((_w, p, cb) =>
+		cb(p === 'media')
+	);
 	if (process.env.FB_PRELOAD) {
 		const { registerIpc } = require(path.join(__dirname, '..', 'dist-electron', 'ipc.cjs'));
 		registerIpc();

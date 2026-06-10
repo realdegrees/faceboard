@@ -1,12 +1,25 @@
 <script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
 	import CameraPreview from '$lib/components/CameraPreview.svelte';
 	import { engine } from '$lib/detection/engine.svelte';
-	import { startDetection, stopDetection, toggleDetection } from '$lib/detection/control';
+	import { toggleDetection } from '$lib/detection/control';
 	import { app } from '$lib/stores/app.svelte';
 	import { runtime } from '$lib/triggers/runtime.svelte';
 	import { phoneHost } from '$lib/phone/host.svelte';
 
 	const general = $derived(app.settings.general);
+
+	// Show the camera preview as soon as the dashboard opens — no need to start
+	// detection first. Release it when leaving the page (unless we're detecting or
+	// streaming from a phone).
+	onMount(() => {
+		if (!engine.stream && engine.source === 'local') {
+			void engine.openCamera(app.settings.general.cameraDeviceId);
+		}
+	});
+	onDestroy(() => {
+		if (!engine.detecting && engine.source === 'local') engine.closeCamera();
+	});
 
 	const onPhone = $derived(engine.source === 'phone');
 	const showCameraControls = $derived(engine.devices.length > 1 || onPhone);
@@ -31,23 +44,21 @@
 	async function onPickCamera(e: Event) {
 		const val = (e.target as HTMLSelectElement).value;
 		if (val === 'phone') return; // pair a phone from Settings → Phone camera
-		const wasRunning = engine.active || onPhone;
 		if (engine.source === 'phone') await phoneHost.stop();
 		app.setGeneral({ cameraDeviceId: val || null });
-		if (wasRunning) {
-			stopDetection();
-			await startDetection();
-		}
+		await engine.openCamera(val || null); // swaps preview; resumes detection if it was on
 	}
 
 	const statusLabel = $derived(
-		engine.status === 'running'
+		engine.detecting
 			? `Live · ${engine.fps} fps`
 			: engine.status === 'loading'
 				? 'Starting…'
 				: engine.status === 'error'
-					? 'Error'
-					: 'Idle'
+					? 'Camera error'
+					: engine.cameraOn
+						? 'Camera ready'
+						: 'Idle'
 	);
 </script>
 
@@ -59,12 +70,17 @@
 		</div>
 		<button
 			onclick={() => toggleDetection()}
-			class="rounded-lg px-4 py-2 text-[13px] font-medium transition-colors
-				{engine.active
+			disabled={engine.status === 'loading'}
+			class="rounded-lg px-4 py-2 text-[13px] font-medium transition-colors disabled:opacity-60
+				{engine.detecting
 				? 'bg-surface-3 text-text hover:bg-surface-2'
 				: 'bg-accent/90 text-black hover:bg-accent'}"
 		>
-			{engine.active || engine.status === 'loading' ? 'Stop detection' : 'Start detection'}
+			{engine.status === 'loading'
+				? 'Starting…'
+				: engine.detecting
+					? 'Stop detection'
+					: 'Start detection'}
 		</button>
 	</header>
 
@@ -91,6 +107,8 @@
 								<p class="text-red-400/90">Camera error</p>
 								<p class="mt-1 text-faint">{engine.error}</p>
 							</div>
+						{:else if engine.status === 'loading'}
+							Starting camera…
 						{:else}
 							Camera preview
 						{/if}
