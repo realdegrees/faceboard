@@ -12,8 +12,10 @@
 	--color-border: #2a2a30;
 	--color-border-strong: #3a3a42;
 	--color-text: #ededf0;
-	--color-muted: #8d8d96;
-	--color-faint: #5c5c64;
+	--color-muted: #9a9aa3;
+	/* Lightened from #5c5c64 (~2.7:1) to ~4.3:1 on the card surfaces so hint text
+	   is legible instead of blending into the background. */
+	--color-faint: #7c7c86;
 	--color-accent: #7cc7ff;
 	--color-accent-dim: #3d6986;
 	--radius-card: 14px;

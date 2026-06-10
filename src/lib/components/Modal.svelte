@@ -34,7 +34,7 @@
 			onclick={() => onClose?.()}
 		></button>
 		<div
-			class="relative w-full overflow-hidden rounded-card border border-border bg-surface-1 shadow-2xl shadow-black/50"
+			class="relative w-full overflow-hidden rounded-card border border-border bg-surface-1 shadow-[0_10px_30px_-14px_rgba(0,0,0,0.55)]"
 			style="max-width: {maxWidth}"
 			transition:scale={{ start: 0.97, duration: 150 }}
 		>
