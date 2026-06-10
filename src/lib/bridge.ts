@@ -44,6 +44,7 @@ export interface LanInfo {
 	token: string;
 	phoneUrl: string;
 	signalUrl: string;
+	caSetupUrl: string;
 }
 
 export function getBridge(): FaceboardApi | null {

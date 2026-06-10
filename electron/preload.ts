@@ -52,6 +52,7 @@ interface LanInfo {
 	token: string;
 	phoneUrl: string;
 	signalUrl: string;
+	caSetupUrl: string;
 }
 
 contextBridge.exposeInMainWorld('faceboard', api);
