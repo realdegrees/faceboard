@@ -11,9 +11,13 @@
 		const bs = engine.face?.blendshapes;
 		if (!bs) return [] as [string, number][];
 		return Object.entries(bs)
+			.filter(([name]) => name !== '_neutral')
 			.sort((a, b) => b[1] - a[1])
 			.slice(0, 6);
 	});
+
+	// Brief accent flash on the preview whenever any trigger fires.
+	const latestFireTs = $derived(runtime.recent[0]?.ts ?? 0);
 
 	const activeTriggers = $derived(
 		app.settings.triggers.filter((t) => runtime.activeIds.includes(t.id))
@@ -59,7 +63,15 @@
 	<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
 		<!-- Camera -->
 		<div class="lg:col-span-2 rounded-card border border-border bg-surface-1 p-4">
-			<div class="aspect-video w-full">
+			<div class="relative aspect-video w-full">
+				{#key latestFireTs}
+					{#if latestFireTs}
+						<div
+							class="pointer-events-none absolute inset-0 z-10 rounded-lg"
+							style="animation: fb-flash 480ms ease-out forwards;"
+						></div>
+					{/if}
+				{/key}
 				{#if engine.stream}
 					<CameraPreview />
 				{:else}

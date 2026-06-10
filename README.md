@@ -1,5 +1,7 @@
 # Faceboard
 
+![CI](https://github.com/realdegrees/faceboard/actions/workflows/ci.yml/badge.svg)
+
 A local, offline desktop soundboard triggered by **facial expressions** and **hand
 signs**. Point your webcam (or your phone over the LAN) at your face, and Faceboard
 plays the sounds you've linked to each expression or gesture. Works in the
