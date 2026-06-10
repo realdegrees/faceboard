@@ -9,11 +9,13 @@ type WorkerOut =
 	| { type: 'error'; error: string }
 	| { type: 'result'; ts: number; face: FaceData | null; hands: HandData[] };
 
-// Cap the long side of the frame fed to MediaPipe. Inference + GPU-upload cost
-// scales with input size and the models resize to a small internal resolution
-// anyway, so a full-res webcam frame is wasted work. Landmarks are normalized
-// [0,1], so downscaling the detector input doesn't shift the preview overlay.
-const DETECT_MAX_DIM = 480;
+// Cap the long side of the frame fed to MediaPipe. The models resize to a small
+// internal resolution so inference cost barely changes with input size, but a
+// smaller frame makes the per-frame ImageBitmap transfer to the worker much
+// cheaper. 640 keeps enough detail for accurate/stable landmarks (a face filling
+// half the frame is still ~180px) while cutting transfer ~4x vs full 720p.
+// Landmarks are normalized [0,1], so this never shifts the preview overlay.
+const DETECT_MAX_DIM = 640;
 
 export interface CameraDevice {
 	deviceId: string;
