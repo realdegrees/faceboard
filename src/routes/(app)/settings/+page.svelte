@@ -4,7 +4,6 @@
 	import { engine } from '$lib/detection/engine.svelte';
 	import Toggle from '$lib/components/Toggle.svelte';
 	import ShortcutCapture from '$lib/components/ShortcutCapture.svelte';
-	import PhoneSetup from '$lib/components/PhoneSetup.svelte';
 	import { APP_VERSION, APP_REPO } from '$lib/version';
 
 	const bridge = getBridge();
@@ -145,16 +144,6 @@
 				</select>
 			</div>
 		</div>
-
-		<!-- Phone camera -->
-		{#if bridge}
-			<div class="rounded-card border border-border bg-surface-1">
-				<h2 class="border-b border-border px-5 py-3 text-[12px] font-medium tracking-wide text-muted uppercase">
-					Phone camera
-				</h2>
-				<PhoneSetup />
-			</div>
-		{/if}
 
 		<!-- About -->
 		<div class="rounded-card border border-border bg-surface-1">

@@ -13,7 +13,52 @@
 	let host = $state('');
 	let selfVideo = $state<HTMLVideoElement>();
 	let overlayCanvas = $state<HTMLCanvasElement>();
+	let displayCanvas = $state<HTMLCanvasElement>();
 	let aspect = $state(3 / 4);
+
+	// The overlay (mesh/skeleton) is computed on the PC from the streamed video and
+	// sent back, so it lags the live picture. Delay the displayed video by roughly
+	// that round trip so the two line up. A frame ring buffer holds recent frames;
+	// each paint shows the one closest to (now - VIDEO_DELAY_MS).
+	const VIDEO_DELAY_MS = 130;
+	const DELAY_POOL = 18;
+	const delayPool: HTMLCanvasElement[] = [];
+	const delayTs: number[] = [];
+	let delayHead = 0;
+
+	function drawDelayedVideo(v: HTMLVideoElement, w: number, h: number) {
+		const dc = displayCanvas;
+		if (!dc) return;
+		if (delayPool.length === 0) {
+			for (let i = 0; i < DELAY_POOL; i++) {
+				delayPool.push(document.createElement('canvas'));
+				delayTs.push(-1);
+			}
+		}
+		const now = performance.now();
+		const cap = delayPool[delayHead];
+		if (cap.width !== w) cap.width = w;
+		if (cap.height !== h) cap.height = h;
+		cap.getContext('2d')?.drawImage(v, 0, 0, w, h);
+		delayTs[delayHead] = now;
+		delayHead = (delayHead + 1) % DELAY_POOL;
+
+		const target = now - VIDEO_DELAY_MS;
+		let bi = -1;
+		let bd = Infinity;
+		for (let i = 0; i < DELAY_POOL; i++) {
+			if (delayTs[i] < 0) continue;
+			const d = Math.abs(delayTs[i] - target);
+			if (d < bd) {
+				bd = d;
+				bi = i;
+			}
+		}
+		if (bi < 0) return;
+		if (dc.width !== w) dc.width = w;
+		if (dc.height !== h) dc.height = h;
+		dc.getContext('2d')?.drawImage(delayPool[bi], 0, 0, w, h);
+	}
 	// Collapsed by default to a compact 16:9 strip so the status + controls stay on
 	// screen; tap the preview to expand it to the camera's native aspect.
 	let expanded = $state(false);
@@ -169,6 +214,8 @@
 		const w = (c.width = v.videoWidth);
 		const h = (c.height = v.videoHeight);
 		if (Math.abs(aspect - w / h) > 1e-3) aspect = w / h;
+		// Show the video delayed to match the overlay's network round trip.
+		drawDelayedVideo(v, w, h);
 		const ctx = c.getContext('2d');
 		if (!ctx) return;
 		ctx.clearRect(0, 0, w, h);
@@ -293,11 +340,17 @@
 		<!-- svelte-ignore a11y_media_has_caption -->
 		<video
 			bind:this={selfVideo}
-			class="h-full w-full object-cover transition-all {lost ? 'blur-md brightness-50' : ''}"
+			class="absolute inset-0 h-full w-full object-cover transition-all {lost ? 'blur-md brightness-50' : ''}"
 			muted
 			playsinline
 			autoplay
 		></video>
+		<!-- Delayed copy of the video so the mesh/skeleton overlay — which has to
+		     travel to the PC for detection and back — lines up with the picture. -->
+		<canvas
+			bind:this={displayCanvas}
+			class="pointer-events-none absolute inset-0 h-full w-full object-cover transition-all {lost ? 'blur-md brightness-50' : ''}"
+		></canvas>
 		<canvas
 			bind:this={overlayCanvas}
 			class="pointer-events-none absolute inset-0 h-full w-full object-cover {lost ? 'opacity-0' : ''}"

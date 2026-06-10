@@ -49,6 +49,32 @@
 	let recordStart = 0;
 	const takeDurations: number[] = [];
 
+	// 3-2-1 countdown before a capture so you have time to get into the pose/expression.
+	let countdownEnabled = $state(true);
+	let countdown = $state<number | null>(null);
+	let countdownTimer: ReturnType<typeof setInterval> | null = null;
+
+	function runCapture(fn: () => void) {
+		if (countdown !== null) return; // already counting down
+		if (!countdownEnabled) {
+			fn();
+			return;
+		}
+		countdown = 3;
+		countdownTimer = setInterval(() => {
+			countdown = (countdown ?? 1) - 1;
+			if (countdown <= 0) {
+				cancelCountdown();
+				fn();
+			}
+		}, 1000);
+	}
+	function cancelCountdown() {
+		if (countdownTimer) clearInterval(countdownTimer);
+		countdownTimer = null;
+		countdown = null;
+	}
+
 	onMount(() => {
 		void (async () => {
 			const mods = { face: modality === 'face', hand: modality === 'hand' };
@@ -62,6 +88,7 @@
 	});
 	onDestroy(() => {
 		if (recordTimer) clearInterval(recordTimer);
+		cancelCountdown();
 		// The dialog narrowed detection to the captured modality; restore both so
 		// the dashboard's face mesh AND hand skeleton resume.
 		if (engine.detecting) void engine.ensureModalities({ face: true, hand: true });
@@ -212,7 +239,7 @@
 	<div class="grid grid-cols-1 gap-5 p-5 sm:grid-cols-2">
 		<!-- Live preview -->
 		<div>
-			<div class="w-full overflow-hidden rounded-lg">
+			<div class="relative w-full overflow-hidden rounded-lg">
 				{#if engine.stream}
 					<CameraPreview />
 				{:else}
@@ -220,8 +247,14 @@
 						Starting camera…
 					</div>
 				{/if}
+				{#if countdown !== null}
+					<div class="absolute inset-0 z-10 grid place-items-center bg-black/45">
+						<span class="text-[72px] font-bold tabular-nums text-white" style="text-shadow: 0 2px 12px rgba(0,0,0,0.6)">{countdown}</span>
+					</div>
+				{/if}
 			</div>
-			<div class="mt-2 flex items-center gap-2 text-[12px]">
+			<div class="mt-2 flex items-center justify-between gap-2 text-[12px]">
+				<div class="flex items-center gap-2">
 				<span class="inline-block h-1.5 w-1.5 rounded-full {present ? 'bg-accent' : 'bg-faint'}"></span>
 				<span class="text-muted">
 					{#if modality === 'face'}
@@ -235,11 +268,21 @@
 					{/if}
 				</span>
 				{#if consistency !== null}
-					<span class="ml-auto text-faint">match {Math.round(consistency * 100)}%</span>
+					<span class="text-faint">match {Math.round(consistency * 100)}%</span>
 				{/if}
 				{#if recording}
-					<span class="ml-auto text-accent" style="animation: fb-pulse 1s ease-in-out infinite;">● rec {recordCount}f</span>
+					<span class="text-accent" style="animation: fb-pulse 1s ease-in-out infinite;">● rec {recordCount}f</span>
 				{/if}
+				</div>
+				<button
+					onclick={() => (countdownEnabled = !countdownEnabled)}
+					title="Wait 3 seconds before capturing so you can get into position"
+					class="rounded-full border px-2.5 py-1 text-[11px] transition-colors {countdownEnabled
+						? 'border-accent/50 bg-accent/15 text-accent'
+						: 'border-border bg-surface-2 text-muted hover:text-text'}"
+				>
+					3s countdown
+				</button>
 			</div>
 		</div>
 
@@ -264,7 +307,7 @@
 							so you only do it once.
 						</p>
 						<button
-							onclick={captureNeutral}
+							onclick={() => runCapture(captureNeutral)}
 							disabled={!present}
 							class="w-full rounded-md bg-accent/90 px-3 py-2 text-[12px] font-medium text-black transition-colors hover:bg-accent disabled:opacity-40"
 						>
@@ -275,14 +318,14 @@
 					<div class="rounded-lg border border-border bg-surface-1 p-3">
 						<p class="mb-3 text-[12px] text-faint">Make the expression and capture it.</p>
 						<button
-							onclick={captureFace}
+							onclick={() => runCapture(captureFace)}
 							disabled={!present}
 							class="w-full rounded-md bg-accent/90 px-3 py-2 text-[12px] font-medium text-black transition-colors hover:bg-accent disabled:opacity-40"
 						>
 							Capture expression
 						</button>
 						<button
-							onclick={captureNeutral}
+							onclick={() => runCapture(captureNeutral)}
 							disabled={!present}
 							class="mt-2 text-[11px] text-faint transition-colors hover:text-text"
 						>
@@ -292,7 +335,7 @@
 				{:else}
 					<div class="rounded-lg border border-accent/40 bg-accent/5 px-3 py-2.5 text-[12px] text-text">
 						Expression captured
-						<button onclick={captureFace} class="ml-2 text-[11px] text-faint transition-colors hover:text-text">
+						<button onclick={() => runCapture(captureFace)} class="ml-2 text-[11px] text-faint transition-colors hover:text-text">
 							Re-capture
 						</button>
 					</div>
@@ -360,7 +403,7 @@
 						<p class="mb-3 text-[11px] text-faint">Record the motion a few times (2+ recommended), each ≤{MAX_RECORD_MS / 1000}s.</p>
 						<div class="flex gap-2">
 							<button
-								onclick={recording ? stopRecording : startRecording}
+								onclick={recording ? stopRecording : () => runCapture(startRecording)}
 								disabled={!present && !recording}
 								class="flex-1 rounded-md px-3 py-2 text-[12px] font-medium transition-colors disabled:opacity-40 {recording
 									? 'bg-red-500/90 text-white hover:bg-red-500'
@@ -379,7 +422,7 @@
 						</div>
 						<p class="mb-3 text-[11px] text-faint">Hold the sign and capture a few from slightly different angles. 3–20 recommended.</p>
 						<div class="flex gap-2">
-							<button onclick={captureSample} disabled={!present || samples.length >= MAX_SAMPLES} class="flex-1 rounded-md bg-accent/90 px-3 py-2 text-[12px] font-medium text-black transition-colors hover:bg-accent disabled:opacity-40">Capture sample</button>
+							<button onclick={() => runCapture(captureSample)} disabled={!present || samples.length >= MAX_SAMPLES} class="flex-1 rounded-md bg-accent/90 px-3 py-2 text-[12px] font-medium text-black transition-colors hover:bg-accent disabled:opacity-40">Capture sample</button>
 							<button onclick={undoSample} disabled={samples.length === 0} class="rounded-md border border-border bg-surface-2 px-3 py-2 text-[12px] text-muted transition-colors hover:text-text disabled:opacity-40">Undo</button>
 						</div>
 					</div>

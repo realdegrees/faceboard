@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import CameraPreview from '$lib/components/CameraPreview.svelte';
+	import PhoneSetup from '$lib/components/PhoneSetup.svelte';
+	import { getBridge } from '$lib/bridge';
 	import { engine } from '$lib/detection/engine.svelte';
 	import { toggleDetection } from '$lib/detection/control';
 	import { app } from '$lib/stores/app.svelte';
@@ -8,6 +10,8 @@
 	import { phoneHost } from '$lib/phone/host.svelte';
 
 	const general = $derived(app.settings.general);
+	const bridge = getBridge();
+	let showPhone = $state(false);
 
 	// Show the camera preview as soon as the dashboard opens — no need to start
 	// detection first. Release it when leaving the page (unless we're detecting or
@@ -189,6 +193,25 @@
 					</div>
 				{/if}
 			</div>
+			{#if bridge}
+				<div class="mt-3 border-t border-border pt-3">
+					<button
+						onclick={() => (showPhone = !showPhone)}
+						class="flex w-full items-center justify-between text-[12px] text-muted transition-colors hover:text-text"
+					>
+						<span class="flex items-center gap-2">
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2" /><path d="M11 18h2" /></svg>
+							Use your phone as a camera
+						</span>
+						<span class="text-faint">{showPhone ? '▾' : '▸'}</span>
+					</button>
+					{#if showPhone}
+						<div class="mt-3">
+							<PhoneSetup />
+						</div>
+					{/if}
+				</div>
+			{/if}
 		</div>
 
 		<!-- Live readout -->
