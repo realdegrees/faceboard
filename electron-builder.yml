@@ -1,0 +1,43 @@
+appId: com.realdegrees.faceboard
+productName: Faceboard
+copyright: Copyright © 2026 realdegrees
+
+directories:
+  output: release
+  buildResources: build-resources
+
+# Everything the app needs at runtime. Main/preload are bundled (no node_modules);
+# build/ holds the renderer + the local MediaPipe wasm & models.
+files:
+  - dist-electron/main.cjs
+  - dist-electron/preload.cjs
+  - build/**/*
+  - package.json
+
+asar: true
+
+win:
+  icon: build-resources/icon.ico
+  target:
+    - nsis
+    - portable
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-${version}-Setup.${ext}
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+
+linux:
+  icon: build-resources/icon.png
+  category: AudioVideo
+  maintainer: realdegrees <18383355+realdegrees@users.noreply.github.com>
+  target:
+    - AppImage
+    - deb
+
+appImage:
+  artifactName: ${productName}-${version}.${ext}
