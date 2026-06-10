@@ -11,6 +11,10 @@ declare global {
 	interface Window {
 		faceboard?: FaceboardApi;
 	}
+
+	// Injected by Vite `define` (see vite.config.ts).
+	const __APP_VERSION__: string;
+	const __APP_REPO__: string;
 }
 
 export {};

@@ -5,6 +5,7 @@
 	import Toggle from '$lib/components/Toggle.svelte';
 	import ShortcutCapture from '$lib/components/ShortcutCapture.svelte';
 	import PhoneSetup from '$lib/components/PhoneSetup.svelte';
+	import { APP_VERSION, APP_REPO } from '$lib/version';
 
 	const bridge = getBridge();
 	const general = $derived(app.settings.general);
@@ -154,5 +155,46 @@
 				<PhoneSetup />
 			</div>
 		{/if}
+
+		<!-- About -->
+		<div class="rounded-card border border-border bg-surface-1">
+			<h2 class="border-b border-border px-5 py-3 text-[12px] font-medium tracking-wide text-muted uppercase">
+				About
+			</h2>
+			<div class="divide-y divide-border">
+				<div class="flex items-center justify-between gap-4 px-5 py-3.5">
+					<div>
+						<p class="text-[13px]">Faceboard</p>
+						<p class="text-[11px] text-faint">Version {APP_VERSION}</p>
+					</div>
+					<span class="rounded-md border border-border bg-surface-2 px-2 py-1 font-mono text-[12px] text-muted">v{APP_VERSION}</span>
+				</div>
+				<div class="flex items-center justify-between gap-4 px-5 py-3.5">
+					<div>
+						<p class="text-[13px]">Source &amp; releases</p>
+						<p class="text-[11px] text-faint">View the code, report issues, or download other versions.</p>
+					</div>
+					<div class="flex items-center gap-2">
+						<a
+							href={APP_REPO}
+							target="_blank"
+							rel="noreferrer"
+							class="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-[12px] text-text transition-colors hover:border-border-strong"
+						>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.85 9.73.5.1.68-.22.68-.49 0-.24-.01-.87-.01-1.71-2.78.62-3.37-1.37-3.37-1.37-.46-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.05A9.36 9.36 0 0 1 12 6.84c.85 0 1.71.12 2.51.34 1.91-1.32 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.47-.01 2.81 0 .27.18.59.69.49A10.02 10.02 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"/></svg>
+							GitHub
+						</a>
+						<a
+							href="{APP_REPO}/releases"
+							target="_blank"
+							rel="noreferrer"
+							class="rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-[12px] text-text transition-colors hover:border-border-strong"
+						>
+							Releases
+						</a>
+					</div>
+				</div>
+			</div>
+		</div>
 	</div>
 </section>
