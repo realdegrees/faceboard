@@ -104,6 +104,17 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
 	app.quit();
 } else {
+	// Trust our own self-signed LAN cert for the desktop renderer's loopback
+	// signaling connection (the phone trusts it via the browser warning).
+	app.on('certificate-error', (event, _wc, url, _error, _cert, callback) => {
+		if (/^(wss|https):\/\/(127\.0\.0\.1|localhost)/.test(url)) {
+			event.preventDefault();
+			callback(true);
+		} else {
+			callback(false);
+		}
+	});
+
 	app.on('second-instance', () => {
 		if (mainWindow) {
 			if (mainWindow.isMinimized()) mainWindow.restore();

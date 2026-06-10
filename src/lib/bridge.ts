@@ -31,6 +31,19 @@ export interface FaceboardApi {
 	app: {
 		setBehavior(behavior: { closeToTray?: boolean; startMinimized?: boolean }): void;
 	};
+	lan: {
+		start(): Promise<LanInfo>;
+		stop(): Promise<void>;
+		info(): Promise<LanInfo | null>;
+	};
+}
+
+export interface LanInfo {
+	ip: string;
+	port: number;
+	token: string;
+	phoneUrl: string;
+	signalUrl: string;
 }
 
 export function getBridge(): FaceboardApi | null {

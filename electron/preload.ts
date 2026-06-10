@@ -38,8 +38,21 @@ const api = {
 	app: {
 		setBehavior: (behavior: { closeToTray?: boolean; startMinimized?: boolean }): void =>
 			ipcRenderer.send('app:set-behavior', behavior)
+	},
+	lan: {
+		start: (): Promise<LanInfo> => ipcRenderer.invoke('lan:start'),
+		stop: (): Promise<void> => ipcRenderer.invoke('lan:stop'),
+		info: (): Promise<LanInfo | null> => ipcRenderer.invoke('lan:info')
 	}
 };
+
+interface LanInfo {
+	ip: string;
+	port: number;
+	token: string;
+	phoneUrl: string;
+	signalUrl: string;
+}
 
 contextBridge.exposeInMainWorld('faceboard', api);
 

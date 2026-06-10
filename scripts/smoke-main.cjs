@@ -25,8 +25,8 @@ app.whenReady().then(async () => {
 	const port = httpServer.address().port;
 
 	const win = new BrowserWindow({
-		width: 1140,
-		height: 740,
+		width: Number(process.env.FB_SMOKE_W) || 1140,
+		height: Number(process.env.FB_SMOKE_H) || 740,
 		show: true,
 		backgroundColor: '#0a0a0b',
 		webPreferences: process.env.FB_PRELOAD

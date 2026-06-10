@@ -27,8 +27,9 @@ await esbuild.build({
 		main: 'electron/main.ts',
 		preload: 'electron/preload.ts',
 		// Built separately too so the integration harness can register the same
-		// IPC handlers the real app uses.
-		ipc: 'electron/ipc.ts'
+		// IPC handlers / start the same LAN server the real app uses.
+		ipc: 'electron/ipc.ts',
+		'lan-server': 'electron/lan-server.ts'
 	}
 });
 

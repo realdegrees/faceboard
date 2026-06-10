@@ -3,8 +3,10 @@ import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { getSettings, saveSettings } from './settings';
+import { lanInfo, startLan, stopLan } from './lan-server';
 
 const AUDIO_EXTENSIONS = ['mp3', 'wav', 'ogg', 'oga', 'opus', 'flac', 'm4a', 'aac', 'webm'];
+const BUILD_DIR = path.join(__dirname, '..', 'build');
 
 /** Register the main-process IPC handlers that aren't tied to a window. */
 export function registerIpc(): void {
@@ -32,4 +34,11 @@ export function registerIpc(): void {
 	});
 
 	ipcMain.handle('sound:exists', async (_e, filePath: string) => existsSync(filePath));
+
+	// Phone-as-webcam LAN server (HTTPS + WebSocket signaling).
+	ipcMain.handle('lan:start', async () => startLan(BUILD_DIR));
+	ipcMain.handle('lan:stop', async () => {
+		await stopLan();
+	});
+	ipcMain.handle('lan:info', () => lanInfo());
 }
