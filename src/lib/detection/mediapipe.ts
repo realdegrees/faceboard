@@ -93,7 +93,10 @@ export class Detector {
 		return this.#delegate;
 	}
 
-	async init(modalities: ModalityFlags): Promise<void> {
+	async init(modalities: ModalityFlags, prefer: Delegate = 'GPU'): Promise<void> {
+		// CPU is chosen up front when WebGL is a software rasterizer (where the
+		// "GPU" path is slower than CPU/XNNPACK).
+		if (!this.#face && !this.#hand) this.#delegate = prefer;
 		this.#vision ??= await FilesetResolver.forVisionTasks(WASM_PATH);
 		try {
 			if (modalities.face && !this.#face) this.#face = await createFaceLandmarker(this.#vision, this.#delegate);

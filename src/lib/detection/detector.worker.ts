@@ -21,7 +21,7 @@ let hand: GestureRecognizer | null = null;
 let delegate: Delegate = 'GPU';
 
 type InMsg =
-	| { type: 'init'; modalities: ModalityFlags }
+	| { type: 'init'; modalities: ModalityFlags; delegate: Delegate }
 	| { type: 'frame'; bitmap: ImageBitmap; ts: number; modalities: ModalityFlags };
 
 type OutMsg =
@@ -42,7 +42,10 @@ async function build(modalities: ModalityFlags): Promise<void> {
 	if (modalities.hand && !hand) hand = await createGestureRecognizer(vision!, delegate);
 }
 
-async function init(modalities: ModalityFlags): Promise<void> {
+async function init(modalities: ModalityFlags, prefer: Delegate): Promise<void> {
+	// On the first init pick the host-chosen delegate (CPU when WebGL is a software
+	// rasterizer — there CPU/XNNPACK is several times faster than software "GPU").
+	if (!face && !hand) delegate = prefer;
 	vision ??= await FilesetResolver.forVisionTasks(WASM_PATH);
 	try {
 		await build(modalities);
@@ -65,7 +68,7 @@ ctx.onmessage = async (e: MessageEvent<InMsg>) => {
 	const msg = e.data;
 	if (msg.type === 'init') {
 		try {
-			await init(msg.modalities);
+			await init(msg.modalities, msg.delegate);
 			post({ type: 'ready', delegate });
 		} catch (err) {
 			post({ type: 'error', error: err instanceof Error ? err.message : String(err) });

@@ -22,6 +22,10 @@ export interface CameraDevice {
 	label: string;
 }
 
+// Renderer strings that mean WebGL is software-emulated (no real GPU). On these,
+// MediaPipe's GPU delegate is slower than CPU, so we pick CPU instead.
+const SOFTWARE_GL = /swiftshader|llvmpipe|softpipe|software|basic render|microsoft basic/i;
+
 /** Unmasked WebGL renderer string — reveals whether we're on a real GPU or a
  *  software rasterizer (SwiftShader / llvmpipe), which is the usual cause of a
  *  ~5fps inference cliff even though the delegate still reports "GPU". */
@@ -120,6 +124,12 @@ class DetectionEngine {
 
 	// Canvas reused only to rotate sideways (phone) feeds before inference.
 	#procCanvas: HTMLCanvasElement | null = null;
+
+	/** True when WebGL is software-emulated — detection then runs on the CPU
+	 *  delegate (faster than software "GPU"), and the UI flags it for the user. */
+	get softwareGl(): boolean {
+		return SOFTWARE_GL.test(this.glRenderer);
+	}
 
 	/** Back-compat: "active" means detection is running. */
 	get active(): boolean {
@@ -263,30 +273,34 @@ class DetectionEngine {
 	/** Create (or re-init for new modalities) the off-thread worker; fall back to
 	 *  the main-thread detector if the worker can't be brought up. */
 	async #ensureDetector(modalities: ModalityFlags): Promise<void> {
+		// Pick the delegate from the WebGL renderer BEFORE creating detectors: on a
+		// software rasterizer (SwiftShader/llvmpipe) MediaPipe's "GPU" delegate runs
+		// the graphs in software and is several times SLOWER than the CPU/XNNPACK
+		// path (measured: ~7fps vs ~25fps for face+hand). On a real GPU, GPU wins.
+		if (!this.glRenderer) this.glRenderer = detectGlRenderer();
+		const prefer: Delegate = this.softwareGl ? 'CPU' : 'GPU';
+
 		if (this.#mode === 'worker') {
 			try {
-				await this.#initWorker(modalities);
+				await this.#initWorker(modalities, prefer);
 			} catch (err) {
 				console.warn('[faceboard] detection worker unavailable, using main thread:', err);
 				this.#mode = 'main';
 				this.#teardownWorker();
-				await this.#detector.init(modalities);
+				await this.#detector.init(modalities, prefer);
 				this.delegate = this.#detector.delegate;
 			}
 		} else {
-			await this.#detector.init(modalities);
+			await this.#detector.init(modalities, prefer);
 			this.delegate = this.#detector.delegate;
 		}
 		this.detectMode = this.#mode;
-		if (!this.glRenderer) {
-			this.glRenderer = detectGlRenderer();
-			console.info(
-				`[faceboard] detection mode=${this.#mode} delegate=${this.delegate} renderer=${this.glRenderer}`
-			);
-		}
+		console.info(
+			`[faceboard] detection mode=${this.#mode} delegate=${this.delegate} renderer=${this.glRenderer}`
+		);
 	}
 
-	#initWorker(modalities: ModalityFlags): Promise<void> {
+	#initWorker(modalities: ModalityFlags, prefer: Delegate): Promise<void> {
 		// Coalesce overlapping inits onto one promise so a second caller never
 		// orphans the first's resolver (which would hang it forever).
 		if (this.#initPromise) return this.#initPromise;
@@ -314,7 +328,7 @@ class DetectionEngine {
 				reject(e);
 			};
 			this.#initTimeout = setTimeout(() => this.#initReject?.(new Error('worker init timeout')), 8000);
-			this.#worker!.postMessage({ type: 'init', modalities });
+			this.#worker!.postMessage({ type: 'init', modalities, delegate: prefer });
 		});
 		return this.#initPromise;
 	}

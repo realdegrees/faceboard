@@ -54,9 +54,9 @@
 		await engine.openCamera(val || null); // swaps preview; resumes detection if it was on
 	}
 
-	// MediaPipe's "GPU" delegate silently falls back to a software rasterizer on
-	// some machines, which is the usual cause of single-digit fps.
-	const softwareGl = $derived(/swiftshader|llvmpipe|software/i.test(engine.glRenderer));
+	// True when WebGL is software-emulated; detection auto-switches to the CPU
+	// delegate (faster than software "GPU"), and we tell the user.
+	const softwareGl = $derived(engine.softwareGl);
 
 	const statusLabel = $derived(
 		engine.detecting
@@ -95,16 +95,13 @@
 
 	{#if engine.active && softwareGl}
 		<div class="mb-4 rounded-card border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-[13px]">
-			<p class="font-medium text-amber-300">Detection is running on a software renderer — that's the slowness.</p>
+			<p class="font-medium text-amber-300">No hardware GPU detected — running detection on the CPU.</p>
 			<p class="mt-1 text-amber-200/80">
-				MediaPipe couldn't use your GPU and fell back to a software rasterizer (<span class="font-mono text-[12px]">{engine.glRenderer || 'unknown'}</span>),
-				which caps inference to a few fps no matter what the app does. To fix it on this machine:
+				WebGL is software-emulated here (<span class="font-mono text-[12px]">{engine.glRenderer || 'unknown'}</span>), so
+				MediaPipe's GPU path would actually be <em>slower</em> than CPU — detection has switched to the CPU delegate, which
+				is several times faster in this case. For the highest frame rate, run the installed desktop app (not a WSL2
+				<span class="font-mono text-[12px]">dev</span> build) and enable hardware acceleration / GPU drivers on the host.
 			</p>
-			<ul class="mt-1.5 list-disc space-y-0.5 pl-5 text-amber-200/80">
-				<li>Run the installed desktop app, not a <span class="font-mono text-[12px]">dev</span> build under WSL2 (WSL2 has no GPU).</li>
-				<li>Enable hardware acceleration / update your GPU drivers on the host.</li>
-				<li>The UI stays smooth either way now (inference is off the main thread); only the detection rate is limited.</li>
-			</ul>
 		</div>
 	{/if}
 
