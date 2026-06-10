@@ -1,7 +1,8 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { app } from '$lib/stores/app.svelte';
 	import { runtime } from '$lib/triggers/runtime.svelte';
-	import { getPreset } from '$lib/triggers/presets';
+	import EditFaceDialog from './EditFaceDialog.svelte';
 	import type { Trigger } from '$lib/types';
 
 	let { trigger }: { trigger: Trigger } = $props();
@@ -9,6 +10,10 @@
 	const score = $derived(runtime.scores[trigger.id] ?? 0);
 	const active = $derived(runtime.activeIds.includes(trigger.id));
 	const sounds = $derived(app.settings.sounds);
+	// Custom face expressions use the region-weighted model and are editable.
+	const editable = $derived(trigger.modality === 'face' && trigger.kind === 'custom' && !!trigger.regions);
+
+	let editing = $state(false);
 
 	function setThreshold(e: Event) {
 		app.updateTrigger(trigger.id, { threshold: +(e.target as HTMLInputElement).value });
@@ -20,7 +25,12 @@
 		app.updateTrigger(trigger.id, { cooldownMs: Math.max(0, +(e.target as HTMLInputElement).value || 0) });
 	}
 	function setSound(e: Event) {
-		app.updateTrigger(trigger.id, { soundId: (e.target as HTMLSelectElement).value || null });
+		const v = (e.target as HTMLSelectElement).value;
+		if (v === '__add') {
+			void goto('/sounds');
+			return;
+		}
+		app.updateTrigger(trigger.id, { soundId: v || null });
 	}
 </script>
 
@@ -71,6 +81,16 @@
 			></span>
 		</button>
 
+		{#if editable}
+			<button
+				onclick={() => (editing = true)}
+				aria-label="Edit"
+				class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-faint transition-colors hover:bg-surface-2 hover:text-text"
+			>
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" /></svg>
+			</button>
+		{/if}
+
 		<button
 			onclick={() => app.removeTrigger(trigger.id)}
 			aria-label="Delete"
@@ -102,6 +122,7 @@
 				{#each sounds as s (s.id)}
 					<option value={s.id}>{s.label}</option>
 				{/each}
+				<option value="__add">＋ Add a sound…</option>
 			</select>
 		</label>
 
@@ -143,3 +164,7 @@
 		</label>
 	</div>
 </div>
+
+{#if editing}
+	<EditFaceDialog {trigger} onClose={() => (editing = false)} />
+{/if}

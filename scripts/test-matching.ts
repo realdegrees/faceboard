@@ -14,6 +14,7 @@ import {
 	toTemplate,
 	DYN_LEN
 } from '../src/lib/triggers/features';
+import { regionMatch, getRegion, suggestRegions } from '../src/lib/triggers/regions';
 import type { DetectionFrame, FaceData, HandData, HandPoint } from '../src/lib/detection/types';
 import type { Trigger } from '../src/lib/types';
 
@@ -107,6 +108,26 @@ const dSame = dtw(tmpl, toTemplate(moveSeq(0.35, 0.95, 18))); // same path, shif
 const dRev = dtw(tmpl, toTemplate(moveSeq(0.8, 0.2, 24))); // reversed motion
 assert(dSame < dRev, 'dtw: same motion closer than reversed motion');
 assert(dSame < 0.15, 'dtw: position-shifted + speed-varied motion is a strong match');
+
+// --- face region-weighted single-capture matching ---
+const kissBrows = faceVector(faceData({ mouthPucker: 0.85, browOuterUpLeft: 0.7, browDownRight: 0.7 }));
+const mouthRegion = getRegion('mouth')!;
+assert(regionMatch(kissBrows, kissBrows, mouthRegion) > 0.99, 'regionMatch: identical mouth region = 1');
+assert(regionMatch(faceVector(faceData({})), kissBrows, mouthRegion) < 0.5, 'regionMatch: neutral vs kiss mouth is low');
+
+const suggested = suggestRegions(kissBrows);
+assert(
+	suggested.includes('mouth') && suggested.includes('brow-left') && suggested.includes('brow-right'),
+	'suggestRegions picks mouth + both brows'
+);
+assert(!suggested.includes('cheeks'), 'suggestRegions ignores inactive cheeks');
+
+const faceTrig = mkTrigger({ modality: 'face', kind: 'custom', target: kissBrows, regions: ['brow-left', 'brow-right', 'mouth'], threshold: 0.7 });
+assert(scoreTrigger(faceTrig, frameFace({ mouthPucker: 0.85, browOuterUpLeft: 0.7, browDownRight: 0.7 })) > 0.85, 'face region trigger matches the captured expression');
+assert(scoreTrigger(faceTrig, frameFace({ mouthPucker: 0.85, browOuterUpLeft: 0.7 })) < 0.7, 'face region trigger fails when one selected region (right brow) is off');
+
+const mouthOnly = mkTrigger({ modality: 'face', kind: 'custom', target: faceVector(faceData({ mouthPucker: 0.85 })), regions: ['mouth'], threshold: 0.7 });
+assert(scoreTrigger(mouthOnly, frameFace({ mouthPucker: 0.85, browDownLeft: 0.9 })) > 0.85, 'unselected regions (brows) are ignored');
 
 console.log(failures === 0 ? 'ALL_PASS' : 'FAILURES=' + failures);
 process.exit(failures === 0 ? 0 : 1);

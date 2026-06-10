@@ -50,7 +50,7 @@ app.whenReady().then(async () => {
 		if (process.env.FB_SMOKE_CLICK_TEXT) {
 			const label = process.env.FB_SMOKE_CLICK_TEXT;
 			await win.webContents.executeJavaScript(
-				`Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim().includes(${JSON.stringify(label)}))?.click();`
+				`Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim().includes(${JSON.stringify(label)}) || b.getAttribute('aria-label') === ${JSON.stringify(label)})?.click();`
 			);
 			await new Promise((r) => setTimeout(r, 600));
 		}

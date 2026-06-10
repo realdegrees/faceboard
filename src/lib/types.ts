@@ -15,6 +15,12 @@ export interface Trigger {
 	samples?: number[][];
 	/** Optional neutral baseline subtracted before matching. */
 	neutral?: number[];
+	/** Custom face: single captured target blendshape vector. */
+	target?: number[];
+	/** Custom face: required region ids; each must match the threshold. */
+	regions?: string[];
+	/** Custom face: flattened captured 478×3 landmarks for the static mesh editor. */
+	meshLandmarks?: number[];
 	/** Hand triggers: number of hands the trigger uses (default 1). */
 	hands?: 1 | 2;
 	/** Hand triggers: held pose vs moving gesture (default 'static'). */
