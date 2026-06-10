@@ -114,6 +114,7 @@ class DetectionEngine {
 	#initResolve: (() => void) | null = null;
 	#initReject: ((e: unknown) => void) | null = null;
 	#initTimeout: ReturnType<typeof setTimeout> | null = null;
+	#initPromise: Promise<void> | null = null;
 
 	// Canvas reused only to rotate sideways (phone) feeds before inference.
 	#procCanvas: HTMLCanvasElement | null = null;
@@ -237,7 +238,13 @@ class DetectionEngine {
 	 * loop is already running. */
 	async ensureModalities(modalities: ModalityFlags): Promise<void> {
 		this.modalities = modalities;
-		if (this.detecting) await this.#ensureDetector(modalities);
+		if (this.detecting) {
+			await this.#ensureDetector(modalities);
+			// Re-seed the loop: if #ensureDetector fell back worker→main the
+			// result-driven worker chain is gone, and a clean restart is harmless
+			// in either mode (#startLoop stops first).
+			if (this.detecting) this.#startLoop();
+		}
 	}
 
 	async refreshDevices(): Promise<void> {
@@ -278,6 +285,9 @@ class DetectionEngine {
 	}
 
 	#initWorker(modalities: ModalityFlags): Promise<void> {
+		// Coalesce overlapping inits onto one promise so a second caller never
+		// orphans the first's resolver (which would hang it forever).
+		if (this.#initPromise) return this.#initPromise;
 		if (typeof Worker === 'undefined' || typeof createImageBitmap === 'undefined') {
 			return Promise.reject(new Error('Worker / createImageBitmap unsupported'));
 		}
@@ -286,29 +296,35 @@ class DetectionEngine {
 			this.#worker.onmessage = (e) => this.#onWorkerMessage(e.data);
 			this.#worker.onerror = (e) => this.#onWorkerError(e);
 		}
-		return new Promise<void>((resolve, reject) => {
-			this.#initResolve = resolve;
-			this.#initReject = reject;
-			this.#initTimeout = setTimeout(() => {
-				this.#initReject?.(new Error('worker init timeout'));
+		this.#initPromise = new Promise<void>((resolve, reject) => {
+			const settle = () => {
+				if (this.#initTimeout) clearTimeout(this.#initTimeout);
+				this.#initTimeout = null;
 				this.#initResolve = this.#initReject = null;
-			}, 8000);
+				this.#initPromise = null;
+			};
+			this.#initResolve = () => {
+				settle();
+				resolve();
+			};
+			this.#initReject = (e) => {
+				settle();
+				reject(e);
+			};
+			this.#initTimeout = setTimeout(() => this.#initReject?.(new Error('worker init timeout')), 8000);
 			this.#worker!.postMessage({ type: 'init', modalities });
 		});
+		return this.#initPromise;
 	}
 
 	#onWorkerMessage(msg: WorkerOut): void {
 		if (msg.type === 'ready') {
 			this.delegate = msg.delegate;
-			if (this.#initTimeout) clearTimeout(this.#initTimeout);
-			this.#initResolve?.();
-			this.#initResolve = this.#initReject = null;
+			this.#initResolve?.(); // settles + clears the init promise/timeout
 			return;
 		}
 		if (msg.type === 'error') {
-			if (this.#initTimeout) clearTimeout(this.#initTimeout);
 			this.#initReject?.(new Error(msg.error));
-			this.#initResolve = this.#initReject = null;
 			return;
 		}
 		// result — ignore a stale frame superseded by a restart (a newer frame is
@@ -334,9 +350,7 @@ class DetectionEngine {
 	#onWorkerError(e: ErrorEvent): void {
 		const reason = e.message || 'worker error';
 		if (this.#initReject) {
-			if (this.#initTimeout) clearTimeout(this.#initTimeout);
-			this.#initReject(new Error(reason));
-			this.#initResolve = this.#initReject = null;
+			this.#initReject(new Error(reason)); // settles + clears
 			return;
 		}
 		// Crash mid-run: drop to the main-thread detector and keep going.
@@ -390,23 +404,51 @@ class DetectionEngine {
 		this.#lastSend = performance.now();
 		const ts = Math.max(this.#lastSend, this.#lastTs + 1);
 		this.#lastTs = ts;
+		// Arm the watchdog up front so neither a stuck capture nor a dropped worker
+		// reply can pin #busy forever — it resets and re-sends after 3s.
+		this.#armWatchdog();
 		const rotated = ((this.rotation % 360) + 360) % 360 !== 0;
 		let bitmap: ImageBitmap;
 		try {
-			bitmap = await createImageBitmap(rotated ? this.#rotateToCanvas(v) : v);
+			if (rotated) {
+				// #rotateToCanvas already downscales to DETECT_MAX_DIM.
+				bitmap = await createImageBitmap(this.#rotateToCanvas(v));
+			} else {
+				// Downscale during bitmap creation: a smaller bitmap means a much
+				// cheaper GPU→CPU readback to transfer it to the worker and a cheaper
+				// re-upload there. Landmarks stay normalized so alignment is unaffected.
+				const vw = v.videoWidth || 640;
+				const vh = v.videoHeight || 480;
+				const scale = Math.min(1, DETECT_MAX_DIM / Math.max(vw, vh));
+				bitmap =
+					scale < 1
+						? await createImageBitmap(v, {
+								resizeWidth: Math.round(vw * scale),
+								resizeHeight: Math.round(vh * scale),
+								resizeQuality: 'medium'
+							})
+						: await createImageBitmap(v);
+			}
 		} catch {
+			if (this.#watchdog) clearTimeout(this.#watchdog);
+			this.#watchdog = null;
 			this.#busy = false;
 			if (this.detecting) this.#timer = setTimeout(() => void this.#sendFrame(), 60);
 			return;
 		}
-		if (!this.detecting || this.#mode !== 'worker' || !this.#worker) {
+		// Superseded while capturing (watchdog fired / stop / restart bumped #lastTs):
+		// drop this frame; the current in-flight frame owns #busy + the watchdog.
+		if (!this.detecting || this.#mode !== 'worker' || !this.#worker || this.#lastTs !== ts) {
 			bitmap.close();
-			this.#busy = false;
 			return;
 		}
 		this.#worker.postMessage({ type: 'frame', bitmap, ts, modalities: this.modalities }, [bitmap]);
-		// Recover if a frame's result never comes back (dropped message / stall).
+	}
+
+	#armWatchdog(): void {
+		if (this.#watchdog) clearTimeout(this.#watchdog);
 		this.#watchdog = setTimeout(() => {
+			this.#watchdog = null;
 			this.#busy = false;
 			if (this.detecting && this.#mode === 'worker') void this.#sendFrame();
 		}, 3000);
@@ -461,6 +503,7 @@ class DetectionEngine {
 		if (this.#initTimeout) clearTimeout(this.#initTimeout);
 		this.#initTimeout = null;
 		this.#initResolve = this.#initReject = null;
+		this.#initPromise = null;
 		this.#worker?.terminate();
 		this.#worker = null;
 		this.#busy = false;

@@ -62,6 +62,9 @@
 	});
 	onDestroy(() => {
 		if (recordTimer) clearInterval(recordTimer);
+		// The dialog narrowed detection to the captured modality; restore both so
+		// the dashboard's face mesh AND hand skeleton resume.
+		if (engine.detecting) void engine.ensureModalities({ face: true, hand: true });
 	});
 
 	const present = $derived(
