@@ -134,7 +134,10 @@
 								? 'bg-red-500'
 								: 'bg-faint'}"
 					></span>
-					<span class="text-muted" title={engine.glRenderer}>{statusLabel}</span>
+					<span
+						class="text-muted"
+						title="{engine.detectMode === 'worker' ? 'off-thread' : 'main-thread'} · {engine.glRenderer}"
+					>{statusLabel}</span>
 					{#if engine.active}
 						<span class="text-faint">· {app.settings.triggers.length} triggers</span>
 					{/if}

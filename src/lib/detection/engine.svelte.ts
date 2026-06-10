@@ -1,7 +1,13 @@
-import { Detector, type ModalityFlags } from './mediapipe';
+import { Detector, type Delegate, type ModalityFlags } from './mediapipe';
 import type { DetectionFrame, FaceData, HandData } from './types';
 
 export type EngineStatus = 'idle' | 'loading' | 'error';
+
+/** Messages posted back by the detection worker. */
+type WorkerOut =
+	| { type: 'ready'; delegate: Delegate }
+	| { type: 'error'; error: string }
+	| { type: 'result'; ts: number; face: FaceData | null; hands: HandData[] };
 
 // Cap the long side of the frame fed to MediaPipe. Inference + GPU-upload cost
 // scales with input size and the models resize to a small internal resolution
@@ -84,17 +90,30 @@ class DetectionEngine {
 	 *  delegate is actually running on a software rasterizer (the real cause of a
 	 *  ~5fps cliff) — surfaced so that's diagnosable, not silent. */
 	glRenderer = $state('');
+	/** Whether inference runs off-thread (worker) or on the main-thread fallback. */
+	detectMode = $state<'worker' | 'main'>('worker');
 
 	/** Hook for the matching engine. */
 	onFrame: ((frame: DetectionFrame) => void) | null = null;
 
-	#detector = new Detector();
+	#detector = new Detector(); // main-thread fallback only
 	#video: HTMLVideoElement | null = null;
 	#timer: ReturnType<typeof setTimeout> | null = null;
 	#external = false;
 	#lastTs = 0;
 	#frameCount = 0;
 	#fpsWindowStart = 0;
+
+	// Off-thread inference (preferred). Falls back to the main-thread #detector if
+	// the worker can't be created (unsupported / packaging issue).
+	#mode: 'worker' | 'main' = 'worker';
+	#worker: Worker | null = null;
+	#busy = false; // a frame is in flight to the worker
+	#lastSend = 0;
+	#watchdog: ReturnType<typeof setTimeout> | null = null;
+	#initResolve: (() => void) | null = null;
+	#initReject: ((e: unknown) => void) | null = null;
+	#initTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	// Canvas reused only to rotate sideways (phone) feeds before inference.
 	#procCanvas: HTMLCanvasElement | null = null;
@@ -158,12 +177,7 @@ class DetectionEngine {
 		}
 		this.status = 'loading';
 		try {
-			await this.#detector.init(this.modalities);
-			this.delegate = this.#detector.delegate;
-			if (!this.glRenderer) {
-				this.glRenderer = detectGlRenderer();
-				console.info(`[faceboard] detection delegate=${this.delegate} renderer=${this.glRenderer}`);
-			}
+			await this.#ensureDetector(this.modalities);
 			this.detecting = true;
 			this.#startLoop();
 			this.status = 'idle';
@@ -188,12 +202,7 @@ class DetectionEngine {
 		this.status = 'loading';
 		this.error = null;
 		try {
-			await this.#detector.init(this.modalities);
-			this.delegate = this.#detector.delegate;
-			if (!this.glRenderer) {
-				this.glRenderer = detectGlRenderer();
-				console.info(`[faceboard] detection delegate=${this.delegate} renderer=${this.glRenderer}`);
-			}
+			await this.#ensureDetector(this.modalities);
 			this.#external = true;
 			this.source = 'phone';
 			await this.#useStream(stream);
@@ -228,7 +237,7 @@ class DetectionEngine {
 	 * loop is already running. */
 	async ensureModalities(modalities: ModalityFlags): Promise<void> {
 		this.modalities = modalities;
-		if (this.detecting) await this.#detector.init(modalities);
+		if (this.detecting) await this.#ensureDetector(modalities);
 	}
 
 	async refreshDevices(): Promise<void> {
@@ -242,45 +251,182 @@ class DetectionEngine {
 		}
 	}
 
+	/** Create (or re-init for new modalities) the off-thread worker; fall back to
+	 *  the main-thread detector if the worker can't be brought up. */
+	async #ensureDetector(modalities: ModalityFlags): Promise<void> {
+		if (this.#mode === 'worker') {
+			try {
+				await this.#initWorker(modalities);
+			} catch (err) {
+				console.warn('[faceboard] detection worker unavailable, using main thread:', err);
+				this.#mode = 'main';
+				this.#teardownWorker();
+				await this.#detector.init(modalities);
+				this.delegate = this.#detector.delegate;
+			}
+		} else {
+			await this.#detector.init(modalities);
+			this.delegate = this.#detector.delegate;
+		}
+		this.detectMode = this.#mode;
+		if (!this.glRenderer) {
+			this.glRenderer = detectGlRenderer();
+			console.info(
+				`[faceboard] detection mode=${this.#mode} delegate=${this.delegate} renderer=${this.glRenderer}`
+			);
+		}
+	}
+
+	#initWorker(modalities: ModalityFlags): Promise<void> {
+		if (typeof Worker === 'undefined' || typeof createImageBitmap === 'undefined') {
+			return Promise.reject(new Error('Worker / createImageBitmap unsupported'));
+		}
+		if (!this.#worker) {
+			this.#worker = new Worker(new URL('./detector.worker.ts', import.meta.url), { type: 'module' });
+			this.#worker.onmessage = (e) => this.#onWorkerMessage(e.data);
+			this.#worker.onerror = (e) => this.#onWorkerError(e);
+		}
+		return new Promise<void>((resolve, reject) => {
+			this.#initResolve = resolve;
+			this.#initReject = reject;
+			this.#initTimeout = setTimeout(() => {
+				this.#initReject?.(new Error('worker init timeout'));
+				this.#initResolve = this.#initReject = null;
+			}, 8000);
+			this.#worker!.postMessage({ type: 'init', modalities });
+		});
+	}
+
+	#onWorkerMessage(msg: WorkerOut): void {
+		if (msg.type === 'ready') {
+			this.delegate = msg.delegate;
+			if (this.#initTimeout) clearTimeout(this.#initTimeout);
+			this.#initResolve?.();
+			this.#initResolve = this.#initReject = null;
+			return;
+		}
+		if (msg.type === 'error') {
+			if (this.#initTimeout) clearTimeout(this.#initTimeout);
+			this.#initReject?.(new Error(msg.error));
+			this.#initResolve = this.#initReject = null;
+			return;
+		}
+		// result — ignore a stale frame superseded by a restart (a newer frame is
+		// already in flight, so leave #busy and its watchdog untouched).
+		if (msg.ts !== this.#lastTs) return;
+		this.#busy = false;
+		if (this.#watchdog) {
+			clearTimeout(this.#watchdog);
+			this.#watchdog = null;
+		}
+		if (!this.detecting || this.#mode !== 'worker') return;
+		this.face = msg.face;
+		this.hands = msg.hands;
+		this.onFrame?.({ tsMs: msg.ts, face: msg.face, hands: msg.hands });
+		this.#countFps();
+		// Pace the next send toward targetFps (measured from the last send so the
+		// rate is min(targetFps, worker throughput)).
+		const period = Math.max(1000 / this.targetFps, 8);
+		const since = performance.now() - this.#lastSend;
+		this.#timer = setTimeout(() => void this.#sendFrame(), Math.max(0, period - since));
+	}
+
+	#onWorkerError(e: ErrorEvent): void {
+		const reason = e.message || 'worker error';
+		if (this.#initReject) {
+			if (this.#initTimeout) clearTimeout(this.#initTimeout);
+			this.#initReject(new Error(reason));
+			this.#initResolve = this.#initReject = null;
+			return;
+		}
+		// Crash mid-run: drop to the main-thread detector and keep going.
+		if (this.#mode === 'worker' && this.detecting) {
+			console.warn('[faceboard] detection worker crashed, switching to main thread:', reason);
+			this.#mode = 'main';
+			this.#teardownWorker();
+			void this.#detector.init(this.modalities).then(() => {
+				this.delegate = this.#detector.delegate;
+				if (this.detecting) this.#startLoop();
+			});
+		}
+	}
+
 	#startLoop(): void {
 		this.#stopLoop();
 		this.#fpsWindowStart = performance.now();
 		this.#frameCount = 0;
-		this.#timer = setTimeout(() => this.#tick(), 0);
+		if (this.#mode === 'worker') {
+			this.#busy = false;
+			void this.#sendFrame();
+		} else {
+			this.#timer = setTimeout(() => this.#tickMain(), 0);
+		}
 	}
 
 	#stopLoop(): void {
 		if (this.#timer) clearTimeout(this.#timer);
 		this.#timer = null;
+		if (this.#watchdog) clearTimeout(this.#watchdog);
+		this.#watchdog = null;
+		this.#busy = false;
 	}
 
 	/**
-	 * One detection per tick: both detectors run on the SAME frame so the face mesh
-	 * and hand skeleton are always in sync. The raw <video> element is handed
-	 * straight to MediaPipe (no intermediate 2D canvas / CSS filter) so the GPU
-	 * delegate can upload the video texture directly — the canonical fast path; a
-	 * filtered canvas both adds main-thread work and defeats that upload.
-	 *
-	 * Self-pacing: the next tick is scheduled AFTER this one finishes, aiming for
-	 * the target frame period but always yielding a little to the UI. So when
-	 * inference is cheap (GPU) we hit ~targetFps, and when it's expensive (CPU
-	 * fallback) fps degrades gracefully instead of the main thread saturating.
+	 * Worker pipeline: grab the current video frame as an ImageBitmap and transfer
+	 * it (zero-copy) to the worker, which runs BOTH detectors on it and posts the
+	 * landmarks back. One frame in flight at a time; the next is sent when the
+	 * result returns. The main thread only does the cheap capture, so inference
+	 * never blocks the UI.
 	 */
-	#tick(): void {
+	async #sendFrame(): Promise<void> {
+		this.#timer = null;
+		if (!this.detecting || this.#mode !== 'worker' || !this.#worker || this.#busy) return;
+		const v = this.#video;
+		if (!v || v.readyState < 2) {
+			this.#timer = setTimeout(() => void this.#sendFrame(), 60);
+			return;
+		}
+		this.#busy = true;
+		this.#lastSend = performance.now();
+		const ts = Math.max(this.#lastSend, this.#lastTs + 1);
+		this.#lastTs = ts;
+		const rotated = ((this.rotation % 360) + 360) % 360 !== 0;
+		let bitmap: ImageBitmap;
+		try {
+			bitmap = await createImageBitmap(rotated ? this.#rotateToCanvas(v) : v);
+		} catch {
+			this.#busy = false;
+			if (this.detecting) this.#timer = setTimeout(() => void this.#sendFrame(), 60);
+			return;
+		}
+		if (!this.detecting || this.#mode !== 'worker' || !this.#worker) {
+			bitmap.close();
+			this.#busy = false;
+			return;
+		}
+		this.#worker.postMessage({ type: 'frame', bitmap, ts, modalities: this.modalities }, [bitmap]);
+		// Recover if a frame's result never comes back (dropped message / stall).
+		this.#watchdog = setTimeout(() => {
+			this.#busy = false;
+			if (this.detecting && this.#mode === 'worker') void this.#sendFrame();
+		}, 3000);
+	}
+
+	/**
+	 * Main-thread fallback loop (used only when the worker is unavailable). Both
+	 * detectors run on the same frame; the raw <video> goes straight to MediaPipe.
+	 * Self-paced toward targetFps with a small floor so the UI still gets a turn.
+	 */
+	#tickMain(): void {
 		this.#timer = null;
 		const start = performance.now();
 		try {
 			const v = this.#video;
 			if (!v || v.readyState < 2) return;
-			// MediaPipe requires strictly increasing timestamps per detector.
 			const ts = Math.max(start, this.#lastTs + 1);
 			this.#lastTs = ts;
-
-			// Only fall back to a canvas to physically rotate a sideways (phone) feed;
-			// otherwise feed the video element itself.
 			const rotated = ((this.rotation % 360) + 360) % 360 !== 0;
 			const input = rotated ? this.#rotateToCanvas(v) : v;
-
 			let frame: DetectionFrame;
 			try {
 				frame = this.#detector.detect(input, ts, this.modalities);
@@ -288,27 +434,36 @@ class DetectionEngine {
 				this.error = err instanceof Error ? err.message : String(err);
 				return;
 			}
-
 			this.face = frame.face;
 			this.hands = frame.hands;
 			this.onFrame?.(frame);
-
-			this.#frameCount++;
-			const elapsed = ts - this.#fpsWindowStart;
-			if (elapsed >= 500) {
-				this.fps = Math.round((this.#frameCount / elapsed) * 1000);
-				this.#frameCount = 0;
-				this.#fpsWindowStart = ts;
-			}
+			this.#countFps();
 		} finally {
-			if (this.detecting) {
+			if (this.detecting && this.#mode === 'main') {
 				const period = Math.max(1000 / this.targetFps, 8);
 				const used = performance.now() - start;
-				// Aim for the target period; always leave a small gap so rendering and
-				// input get a turn even when inference eats most of the budget.
-				this.#timer = setTimeout(() => this.#tick(), Math.max(6, period - used));
+				this.#timer = setTimeout(() => this.#tickMain(), Math.max(6, period - used));
 			}
 		}
+	}
+
+	#countFps(): void {
+		this.#frameCount++;
+		const elapsed = performance.now() - this.#fpsWindowStart;
+		if (elapsed >= 500) {
+			this.fps = Math.round((this.#frameCount / elapsed) * 1000);
+			this.#frameCount = 0;
+			this.#fpsWindowStart = performance.now();
+		}
+	}
+
+	#teardownWorker(): void {
+		if (this.#initTimeout) clearTimeout(this.#initTimeout);
+		this.#initTimeout = null;
+		this.#initResolve = this.#initReject = null;
+		this.#worker?.terminate();
+		this.#worker = null;
+		this.#busy = false;
 	}
 
 	/** Rotate a sideways feed into an offscreen canvas (downscaled) for detection.

@@ -8,102 +8,45 @@ import {
 import type { DetectionFrame, FaceData, HandData } from './types';
 
 // All assets are served locally so the running app never hits the network.
-const WASM_PATH = '/mediapipe/wasm';
-const FACE_MODEL = '/mediapipe/models/face_landmarker.task';
-const HAND_MODEL = '/mediapipe/models/gesture_recognizer.task';
+export const WASM_PATH = '/mediapipe/wasm';
+export const FACE_MODEL = '/mediapipe/models/face_landmarker.task';
+export const HAND_MODEL = '/mediapipe/models/gesture_recognizer.task';
 
 export interface ModalityFlags {
 	face: boolean;
 	hand: boolean;
 }
 
-type Vision = Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>;
+export type Delegate = 'GPU' | 'CPU';
+export type Vision = Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>;
 
-/**
- * Wraps the MediaPipe Face Landmarker (blendshapes) and Gesture Recognizer
- * (hand landmarks + builtin gestures). Tries the GPU delegate first and falls
- * back to CPU if the GPU context can't be created.
- */
-export class Detector {
-	#vision: Vision | null = null;
-	#face: FaceLandmarker | null = null;
-	#hand: GestureRecognizer | null = null;
-	#delegate: 'GPU' | 'CPU' = 'GPU';
-
-	get delegate(): 'GPU' | 'CPU' {
-		return this.#delegate;
-	}
-
-	async init(modalities: ModalityFlags): Promise<void> {
-		this.#vision ??= await FilesetResolver.forVisionTasks(WASM_PATH);
-		if (modalities.face && !this.#face) this.#face = await this.#createFace();
-		if (modalities.hand && !this.#hand) this.#hand = await this.#createHand();
-	}
-
-	async #createFace(): Promise<FaceLandmarker> {
-		try {
-			return await FaceLandmarker.createFromOptions(this.#vision!, {
-				baseOptions: { modelAssetPath: FACE_MODEL, delegate: this.#delegate },
-				outputFaceBlendshapes: true,
-				outputFacialTransformationMatrixes: false,
-				runningMode: 'VIDEO',
-				numFaces: 1,
-				// Looser thresholds so faces are picked up in poor lighting / at angles.
-				minFaceDetectionConfidence: 0.3,
-				minFacePresenceConfidence: 0.3,
-				minTrackingConfidence: 0.3
-			});
-		} catch (err) {
-			if (this.#delegate === 'GPU') {
-				this.#delegate = 'CPU';
-				return this.#createFace();
-			}
-			throw err;
-		}
-	}
-
-	async #createHand(): Promise<GestureRecognizer> {
-		try {
-			return await GestureRecognizer.createFromOptions(this.#vision!, {
-				baseOptions: { modelAssetPath: HAND_MODEL, delegate: this.#delegate },
-				runningMode: 'VIDEO',
-				numHands: 2,
-				// Lower so hands are detected before all five fingers are clearly visible
-				// and in low light.
-				minHandDetectionConfidence: 0.3,
-				minHandPresenceConfidence: 0.3,
-				minTrackingConfidence: 0.3
-			});
-		} catch (err) {
-			if (this.#delegate === 'GPU') {
-				this.#delegate = 'CPU';
-				return this.#createHand();
-			}
-			throw err;
-		}
-	}
-
-	detect(
-		input: HTMLVideoElement | HTMLCanvasElement,
-		tsMs: number,
-		modalities: ModalityFlags
-	): DetectionFrame {
-		let face: FaceData | null = null;
-		let hands: HandData[] = [];
-		if (this.#face && modalities.face) face = toFace(this.#face.detectForVideo(input, tsMs));
-		if (this.#hand && modalities.hand) hands = toHands(this.#hand.recognizeForVideo(input, tsMs));
-		return { tsMs, face, hands };
-	}
-
-	close(): void {
-		this.#face?.close();
-		this.#hand?.close();
-		this.#face = null;
-		this.#hand = null;
-	}
+// Looser thresholds so faces/hands are picked up in poor lighting, at angles, and
+// before all five fingers are clearly visible.
+export function createFaceLandmarker(vision: Vision, delegate: Delegate): Promise<FaceLandmarker> {
+	return FaceLandmarker.createFromOptions(vision, {
+		baseOptions: { modelAssetPath: FACE_MODEL, delegate },
+		outputFaceBlendshapes: true,
+		outputFacialTransformationMatrixes: false,
+		runningMode: 'VIDEO',
+		numFaces: 1,
+		minFaceDetectionConfidence: 0.3,
+		minFacePresenceConfidence: 0.3,
+		minTrackingConfidence: 0.3
+	});
 }
 
-function toFace(result: FaceLandmarkerResult): FaceData | null {
+export function createGestureRecognizer(vision: Vision, delegate: Delegate): Promise<GestureRecognizer> {
+	return GestureRecognizer.createFromOptions(vision, {
+		baseOptions: { modelAssetPath: HAND_MODEL, delegate },
+		runningMode: 'VIDEO',
+		numHands: 2,
+		minHandDetectionConfidence: 0.3,
+		minHandPresenceConfidence: 0.3,
+		minTrackingConfidence: 0.3
+	});
+}
+
+export function toFace(result: FaceLandmarkerResult): FaceData | null {
 	const landmarks = result.faceLandmarks?.[0];
 	if (!landmarks || landmarks.length === 0) return null;
 	const blendshapes: Record<string, number> = {};
@@ -116,7 +59,7 @@ function toFace(result: FaceLandmarkerResult): FaceData | null {
 	};
 }
 
-function toHands(result: GestureRecognizerResult): HandData[] {
+export function toHands(result: GestureRecognizerResult): HandData[] {
 	const hands: HandData[] = [];
 	for (let i = 0; i < result.landmarks.length; i++) {
 		const top = result.gestures?.[i]?.[0];
@@ -131,4 +74,55 @@ function toHands(result: GestureRecognizerResult): HandData[] {
 		});
 	}
 	return hands;
+}
+
+type ImageInput = HTMLVideoElement | HTMLCanvasElement | ImageBitmap;
+
+/**
+ * Synchronous main-thread detector. Used only as a fallback when the off-thread
+ * worker can't be created (the worker path is preferred so inference never blocks
+ * the UI). Tries the GPU delegate first, falling back to CPU.
+ */
+export class Detector {
+	#vision: Vision | null = null;
+	#face: FaceLandmarker | null = null;
+	#hand: GestureRecognizer | null = null;
+	#delegate: Delegate = 'GPU';
+
+	get delegate(): Delegate {
+		return this.#delegate;
+	}
+
+	async init(modalities: ModalityFlags): Promise<void> {
+		this.#vision ??= await FilesetResolver.forVisionTasks(WASM_PATH);
+		try {
+			if (modalities.face && !this.#face) this.#face = await createFaceLandmarker(this.#vision, this.#delegate);
+			if (modalities.hand && !this.#hand) this.#hand = await createGestureRecognizer(this.#vision, this.#delegate);
+		} catch (err) {
+			if (this.#delegate === 'GPU') {
+				this.#delegate = 'CPU';
+				this.#face?.close();
+				this.#hand?.close();
+				this.#face = null;
+				this.#hand = null;
+				return this.init(modalities);
+			}
+			throw err;
+		}
+	}
+
+	detect(input: ImageInput, tsMs: number, modalities: ModalityFlags): DetectionFrame {
+		let face: FaceData | null = null;
+		let hands: HandData[] = [];
+		if (this.#face && modalities.face) face = toFace(this.#face.detectForVideo(input, tsMs));
+		if (this.#hand && modalities.hand) hands = toHands(this.#hand.recognizeForVideo(input, tsMs));
+		return { tsMs, face, hands };
+	}
+
+	close(): void {
+		this.#face?.close();
+		this.#hand?.close();
+		this.#face = null;
+		this.#hand = null;
+	}
 }
