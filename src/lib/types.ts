@@ -73,6 +73,8 @@ export type CameraSource = 'local' | 'phone';
 
 export interface GeneralSettings {
 	cameraDeviceId: string | null;
+	/** Audio output (sink) device for sound playback, or null for the system default. */
+	audioOutputDeviceId: string | null;
 	source: CameraSource;
 	/** Detection loop target rate. */
 	detectionFps: number;
@@ -106,6 +108,7 @@ export function defaultSettings(): FaceboardSettings {
 		shortcuts: { toggleDetection: 'CommandOrControl+Shift+D' },
 		general: {
 			cameraDeviceId: null,
+			audioOutputDeviceId: null,
 			source: 'local',
 			detectionFps: 30,
 			mirror: true,

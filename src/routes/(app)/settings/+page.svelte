@@ -3,6 +3,7 @@
 	import { getBridge } from '$lib/bridge';
 	import { app } from '$lib/stores/app.svelte';
 	import { engine } from '$lib/detection/engine.svelte';
+	import { soundPlayer } from '$lib/audio/player.svelte';
 	import Toggle from '$lib/components/Toggle.svelte';
 	import ShortcutCapture from '$lib/components/ShortcutCapture.svelte';
 	import { APP_VERSION, APP_REPO } from '$lib/version';
@@ -24,6 +25,34 @@
 	});
 	async function setStartupEnabled(enabled: boolean) {
 		if (bridge) startup = await bridge.app.setStartup(enabled);
+	}
+
+	// Available audio output (sink) devices for the playback-device picker. Labels
+	// require media permission, which the app already grants; fall back to a generic
+	// name otherwise. The 'default'/'communications' entries are virtual aliases —
+	// our explicit "System default" option covers that, so drop them.
+	let audioOutputs = $state<{ deviceId: string; label: string }[]>([]);
+	async function refreshAudioOutputs() {
+		try {
+			const all = await navigator.mediaDevices.enumerateDevices();
+			audioOutputs = all
+				.filter((d) => d.kind === 'audiooutput' && d.deviceId !== 'default' && d.deviceId !== 'communications')
+				.map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Output device ${i + 1}` }));
+		} catch {
+			audioOutputs = [];
+		}
+	}
+	onMount(() => {
+		void refreshAudioOutputs();
+		const onChange = () => void refreshAudioOutputs();
+		navigator.mediaDevices.addEventListener('devicechange', onChange);
+		return () => navigator.mediaDevices.removeEventListener('devicechange', onChange);
+	});
+
+	function setAudioOutput(value: string) {
+		const deviceId = value || null;
+		app.setGeneral({ audioOutputDeviceId: deviceId });
+		void soundPlayer.setOutputDevice(deviceId);
 	}
 
 	function setBehavior(patch: { closeToTray?: boolean; startMinimized?: boolean }) {
@@ -170,6 +199,29 @@
 				>
 					<option value="">Default camera</option>
 					{#each engine.devices as d (d.deviceId)}
+						<option value={d.deviceId}>{d.label}</option>
+					{/each}
+				</select>
+			</div>
+		</div>
+
+		<!-- Audio -->
+		<div class="rounded-card border border-border bg-surface-1">
+			<h2 class="border-b border-border px-5 py-3 text-[12px] font-medium tracking-wide text-muted uppercase">
+				Audio
+			</h2>
+			<div class="flex items-center justify-between gap-4 px-5 py-3.5">
+				<div>
+					<p class="text-[13px]">Output device</p>
+					<p class="text-[11px] text-faint">Where trigger sounds play.</p>
+				</div>
+				<select
+					value={general.audioOutputDeviceId ?? ''}
+					onchange={(e) => setAudioOutput((e.target as HTMLSelectElement).value)}
+					class="max-w-52 truncate rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] text-text outline-none focus:border-border-strong"
+				>
+					<option value="">System default</option>
+					{#each audioOutputs as d (d.deviceId)}
 						<option value={d.deviceId}>{d.label}</option>
 					{/each}
 				</select>

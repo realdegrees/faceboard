@@ -16,11 +16,33 @@ class SoundPlayer {
 	// Looping sources for 'while-active' (gate) triggers, keyed by sound id.
 	#gates = new Map<string, AudioBufferSourceNode>();
 	#gatePending = new Set<string>();
+	// Selected output sink ('' = system default). Applied to the context via setSinkId.
+	#sinkId = '';
 
 	#context(): AudioContext {
 		this.#ctx ??= new AudioContext();
+		this.#applySink(this.#ctx);
 		if (this.#ctx.state === 'suspended') void this.#ctx.resume();
 		return this.#ctx;
+	}
+
+	/** Route playback to a chosen output device (null = system default). Reroutes
+	 *  any currently-playing sounds immediately. setSinkId is a Chromium Web Audio
+	 *  feature available in Electron's renderer. */
+	async setOutputDevice(deviceId: string | null): Promise<void> {
+		this.#sinkId = deviceId ?? '';
+		if (this.#ctx) await this.#applySink(this.#ctx);
+	}
+
+	#applySink(ctx: AudioContext): Promise<void> | void {
+		const sinkable = ctx as AudioContext & {
+			sinkId?: string;
+			setSinkId?: (id: string) => Promise<void>;
+		};
+		if (typeof sinkable.setSinkId !== 'function' || sinkable.sinkId === this.#sinkId) return;
+		return sinkable.setSinkId(this.#sinkId).catch((err) => {
+			console.error('[sound] failed to set output device', err);
+		});
 	}
 
 	async load(soundId: string, filePath: string): Promise<AudioBuffer | null> {

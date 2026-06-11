@@ -31,6 +31,7 @@
 
 		void (async () => {
 			await app.load();
+			void soundPlayer.setOutputDevice(app.settings.general.audioOutputDeviceId);
 			soundPlayer.preloadAll();
 			const accel = app.settings.shortcuts.toggleDetection;
 			if (accel) await bridge?.shortcuts.register(accel);
