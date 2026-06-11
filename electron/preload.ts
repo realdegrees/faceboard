@@ -37,7 +37,11 @@ const api = {
 	},
 	app: {
 		setBehavior: (behavior: { closeToTray?: boolean; startMinimized?: boolean }): void =>
-			ipcRenderer.send('app:set-behavior', behavior)
+			ipcRenderer.send('app:set-behavior', behavior),
+		getStartup: (): Promise<{ isPortable: boolean; openAtLogin: boolean }> =>
+			ipcRenderer.invoke('app:get-startup'),
+		setStartup: (enabled: boolean): Promise<{ isPortable: boolean; openAtLogin: boolean }> =>
+			ipcRenderer.invoke('app:set-startup', enabled)
 	},
 	lan: {
 		start: (): Promise<LanInfo> => ipcRenderer.invoke('lan:start'),

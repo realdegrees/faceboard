@@ -30,6 +30,8 @@ export interface FaceboardApi {
 	};
 	app: {
 		setBehavior(behavior: { closeToTray?: boolean; startMinimized?: boolean }): void;
+		getStartup(): Promise<{ isPortable: boolean; openAtLogin: boolean }>;
+		setStartup(enabled: boolean): Promise<{ isPortable: boolean; openAtLogin: boolean }>;
 	};
 	lan: {
 		start(): Promise<LanInfo>;

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { getBridge } from '$lib/bridge';
 	import { app } from '$lib/stores/app.svelte';
 	import { engine } from '$lib/detection/engine.svelte';
@@ -10,6 +11,20 @@
 	const general = $derived(app.settings.general);
 
 	const FPS_OPTIONS = [10, 15, 18, 24, 30];
+
+	// Launch-on-startup is an OS login item, not part of our persisted settings —
+	// read its live state here. Portable builds report isPortable, which greys the
+	// toggle out (they can't register a stable startup entry).
+	let startup = $state<{ isPortable: boolean; openAtLogin: boolean }>({
+		isPortable: false,
+		openAtLogin: false
+	});
+	onMount(async () => {
+		if (bridge) startup = await bridge.app.getStartup();
+	});
+	async function setStartupEnabled(enabled: boolean) {
+		if (bridge) startup = await bridge.app.setStartup(enabled);
+	}
 
 	function setBehavior(patch: { closeToTray?: boolean; startMinimized?: boolean }) {
 		app.setGeneral(patch);
@@ -115,6 +130,22 @@
 						<p class="text-[11px] text-faint">Begin detecting as soon as the app launches.</p>
 					</div>
 					<Toggle checked={general.autostartDetection} onChange={(v) => app.setGeneral({ autostartDetection: v })} label="Auto-start detection" />
+				</div>
+				<div class="flex items-center justify-between gap-4 px-5 py-3.5">
+					<div>
+						<p class="text-[13px] {startup.isPortable ? 'text-faint' : ''}">Launch on startup</p>
+						<p class="text-[11px] text-faint">
+							{startup.isPortable
+								? 'Needs a full install — the portable build can’t register a startup entry.'
+								: 'Open Faceboard automatically when you sign in.'}
+						</p>
+					</div>
+					<Toggle
+						checked={startup.openAtLogin}
+						disabled={startup.isPortable}
+						onChange={setStartupEnabled}
+						label="Launch on startup"
+					/>
 				</div>
 			</div>
 		</div>
