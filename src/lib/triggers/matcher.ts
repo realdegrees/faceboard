@@ -37,8 +37,6 @@ function scoreBuiltin(trigger: Trigger, frame: DetectionFrame): number {
 function scoreCustom(trigger: Trigger, frame: DetectionFrame): number {
 	if (trigger.modality === 'face') {
 		if (!frame.face) return 0;
-		// Dynamic (motion) expressions are matched temporally in the runtime.
-		if (trigger.motion === 'dynamic') return 0;
 		// Neutral-relative expression match (auto-weighted by what moved), with an
 		// optional head-pose gate.
 		if (trigger.target) {
@@ -57,8 +55,7 @@ function scoreCustom(trigger: Trigger, frame: DetectionFrame): number {
 		return 0;
 	}
 
-	// hand static poses (dynamic gestures are matched temporally in the runtime)
-	if (trigger.motion === 'dynamic') return 0;
+	// hand static poses
 	const samples = trigger.samples;
 	if (!samples || samples.length === 0) return 0;
 	const count = trigger.hands === 2 ? 2 : 1;

@@ -2,14 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { engine } from '$lib/detection/engine.svelte';
 	import { app } from '$lib/stores/app.svelte';
-	import {
-		bestCosine,
-		faceVector,
-		handsFrameVector,
-		normalizeStaticPose,
-		orderHands,
-		toTemplate
-	} from '$lib/triggers/features';
+	import { bestCosine, faceVector, normalizeStaticPose, orderHands } from '$lib/triggers/features';
 	import type { HeadPose } from '$lib/detection/types';
 	import { newId, type Modality, type Trigger } from '$lib/types';
 	import CameraPreview from './CameraPreview.svelte';
@@ -22,7 +15,6 @@
 	}: { modality: Modality; onClose: () => void; onSaved: (t: Trigger) => void } = $props();
 
 	const MAX_SAMPLES = 20;
-	const MAX_RECORD_MS = 3500;
 	const r4 = (x: number) => Math.round(x * 1e4) / 1e4;
 
 	let name = $state('');
@@ -37,17 +29,9 @@
 
 	// Hand
 	let handCount = $state<1 | 2>(1);
-	let mode = $state<'pose' | 'gesture'>('pose');
 	let ignoreRotation = $state(false);
 	let eitherHand = $state(false);
 	let samples = $state<number[][]>([]);
-	let takes = $state<number[][][]>([]);
-	let recording = $state(false);
-	let recordCount = $state(0);
-	let recordFrames: number[][] = [];
-	let recordTimer: ReturnType<typeof setInterval> | null = null;
-	let recordStart = 0;
-	const takeDurations: number[] = [];
 
 	// 3-2-1 countdown before a capture so you have time to get into the pose/expression.
 	let countdownEnabled = $state(true);
@@ -87,7 +71,6 @@
 		})();
 	});
 	onDestroy(() => {
-		if (recordTimer) clearInterval(recordTimer);
 		if (neutralFlashTimer) clearTimeout(neutralFlashTimer);
 		cancelCountdown();
 		// The dialog narrowed detection to the captured modality; restore both so
@@ -122,7 +105,7 @@
 		return ordered ? normalizeStaticPose(ordered) : null;
 	}
 	const consistency = $derived.by(() => {
-		if (modality !== 'hand' || mode !== 'pose' || samples.length === 0) return null;
+		if (modality !== 'hand' || samples.length === 0) return null;
 		const cur = poseVector();
 		return cur ? bestCosine(cur, samples) : null;
 	});
@@ -134,56 +117,12 @@
 		samples = samples.slice(0, -1);
 	}
 
-	// --- Hand gesture ---
-	function startRecording() {
-		if (recording) return;
-		recordFrames = [];
-		recordCount = 0;
-		recordStart = performance.now();
-		recording = true;
-		recordTimer = setInterval(() => {
-			const ordered = orderHands(engine.hands, handCount);
-			if (ordered) {
-				recordFrames.push(handsFrameVector(ordered));
-				recordCount = recordFrames.length;
-			}
-			if (performance.now() - recordStart > MAX_RECORD_MS) stopRecording();
-		}, 30);
-	}
-	function stopRecording() {
-		if (recordTimer) clearInterval(recordTimer);
-		recordTimer = null;
-		recording = false;
-		const dur = performance.now() - recordStart;
-		if (recordFrames.length >= 8) {
-			takes = [...takes, toTemplate(recordFrames)];
-			takeDurations.push(dur);
-		}
-		recordFrames = [];
-		recordCount = 0;
-	}
-	function removeTake() {
-		takes = takes.slice(0, -1);
-		takeDurations.pop();
-	}
-
-	const isGesture = $derived(modality === 'hand' && mode === 'gesture');
 	const canSave = $derived(
 		name.trim().length > 0 &&
-			(modality === 'face'
-				? captured && neutralSet
-				: isGesture
-					? takes.length >= 2
-					: samples.length >= 3)
+			(modality === 'face' ? captured && neutralSet : samples.length >= 3)
 	);
 
-	const title = $derived(
-		modality === 'face'
-			? 'Record facial expression'
-			: mode === 'gesture'
-				? 'Record hand gesture'
-				: 'Record hand sign'
-	);
+	const title = $derived(modality === 'face' ? 'Record facial expression' : 'Record hand sign');
 
 	function save() {
 		if (!canSave) return;
@@ -201,7 +140,6 @@
 			const neutral = app.settings.general.faceNeutral;
 			onSaved({
 				...base,
-				motion: 'static',
 				target: $state.snapshot(target) as number[],
 				neutral: neutral ? ($state.snapshot(neutral) as number[]) : undefined,
 				// Always store the head pose so the toggle can be flipped later on the card.
@@ -210,24 +148,9 @@
 				threshold: 0.55,
 				cooldownMs: 800
 			});
-		} else if (isGesture) {
-			const avg = takeDurations.length
-				? Math.round(takeDurations.reduce((a, b) => a + b, 0) / takeDurations.length)
-				: 1500;
-			onSaved({
-				...base,
-				motion: 'dynamic',
-				hands: handCount,
-				eitherHand,
-				sequences: $state.snapshot(takes) as number[][][],
-				durationMs: avg,
-				threshold: 0.5,
-				cooldownMs: 900
-			});
 		} else {
 			onSaved({
 				...base,
-				motion: 'static',
 				hands: handCount,
 				rotationInvariant: ignoreRotation,
 				eitherHand,
@@ -276,9 +199,6 @@
 				{#if consistency !== null}
 					<span class="text-faint">match {Math.round(consistency * 100)}%</span>
 				{/if}
-				{#if recording}
-					<span class="text-accent" style="animation: fb-pulse 1s ease-in-out infinite;">● rec {recordCount}f</span>
-				{/if}
 				</div>
 				<button
 					onclick={() => (countdownEnabled = !countdownEnabled)}
@@ -299,7 +219,7 @@
 				<input
 					id="cap-name"
 					bind:value={name}
-					placeholder={modality === 'face' ? 'e.g. Sly wink' : isGesture ? 'e.g. Wave' : 'e.g. Rock on'}
+					placeholder={modality === 'face' ? 'e.g. Sly wink' : 'e.g. Rock on'}
 					class="w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-[13px] outline-none focus:border-border-strong"
 				/>
 			</div>
@@ -365,34 +285,23 @@
 					</div>
 				{/if}
 			{:else}
-				<div class="flex gap-3">
-					<div class="flex-1">
-						<span class="mb-1.5 block text-[12px] text-muted">Hands</span>
-						<div class="flex gap-1 rounded-lg border border-border bg-surface-2 p-1">
-							<button class="{segBtn} {handCount === 1 ? 'bg-surface-3 text-text' : 'text-muted'}" onclick={() => (handCount = 1)}>One</button>
-							<button class="{segBtn} {handCount === 2 ? 'bg-surface-3 text-text' : 'text-muted'}" onclick={() => (handCount = 2)}>Two</button>
-						</div>
-					</div>
-					<div class="flex-1">
-						<span class="mb-1.5 block text-[12px] text-muted">Type</span>
-						<div class="flex gap-1 rounded-lg border border-border bg-surface-2 p-1">
-							<button class="{segBtn} {mode === 'pose' ? 'bg-surface-3 text-text' : 'text-muted'}" onclick={() => (mode = 'pose')}>Pose</button>
-							<button class="{segBtn} {mode === 'gesture' ? 'bg-surface-3 text-text' : 'text-muted'}" onclick={() => (mode = 'gesture')}>Gesture</button>
-						</div>
+				<div>
+					<span class="mb-1.5 block text-[12px] text-muted">Hands</span>
+					<div class="flex gap-1 rounded-lg border border-border bg-surface-2 p-1">
+						<button class="{segBtn} {handCount === 1 ? 'bg-surface-3 text-text' : 'text-muted'}" onclick={() => (handCount = 1)}>One</button>
+						<button class="{segBtn} {handCount === 2 ? 'bg-surface-3 text-text' : 'text-muted'}" onclick={() => (handCount = 2)}>Two</button>
 					</div>
 				</div>
 
 				<div class="flex flex-wrap gap-2">
-					{#if mode === 'pose'}
-						<button
-							onclick={() => (ignoreRotation = !ignoreRotation)}
-							class="rounded-full border px-2.5 py-1 text-[11px] transition-colors {ignoreRotation
-								? 'border-accent/50 bg-accent/15 text-accent'
-								: 'border-border bg-surface-2 text-muted hover:text-text'}"
-						>
-							Ignore rotation
-						</button>
-					{/if}
+					<button
+						onclick={() => (ignoreRotation = !ignoreRotation)}
+						class="rounded-full border px-2.5 py-1 text-[11px] transition-colors {ignoreRotation
+							? 'border-accent/50 bg-accent/15 text-accent'
+							: 'border-border bg-surface-2 text-muted hover:text-text'}"
+					>
+						Ignore rotation
+					</button>
 					<button
 						onclick={() => (eitherHand = !eitherHand)}
 						class="rounded-full border px-2.5 py-1 text-[11px] transition-colors {eitherHand
@@ -403,39 +312,17 @@
 					</button>
 				</div>
 
-				{#if isGesture}
-					<div class="rounded-lg border border-border bg-surface-1 p-3">
-						<div class="mb-2 flex items-center justify-between text-[12px]">
-							<span class="text-text">Takes</span>
-							<span class="text-faint">{takes.length} recorded</span>
-						</div>
-						<p class="mb-3 text-[11px] text-faint">Record the motion a few times (2+ recommended), each ≤{MAX_RECORD_MS / 1000}s.</p>
-						<div class="flex gap-2">
-							<button
-								onclick={recording ? stopRecording : () => runCapture(startRecording)}
-								disabled={!present && !recording}
-								class="flex-1 rounded-md px-3 py-2 text-[12px] font-medium transition-colors disabled:opacity-40 {recording
-									? 'bg-red-500/90 text-white hover:bg-red-500'
-									: 'bg-accent/90 text-black hover:bg-accent'}"
-							>
-								{recording ? 'Stop' : 'Record take'}
-							</button>
-							<button onclick={removeTake} disabled={takes.length === 0 || recording} class="rounded-md border border-border bg-surface-2 px-3 py-2 text-[12px] text-muted transition-colors hover:text-text disabled:opacity-40">Undo</button>
-						</div>
+				<div class="rounded-lg border border-border bg-surface-1 p-3">
+					<div class="mb-2 flex items-center justify-between text-[12px]">
+						<span class="text-text">Samples</span>
+						<span class="text-faint">{samples.length} / {MAX_SAMPLES}</span>
 					</div>
-				{:else}
-					<div class="rounded-lg border border-border bg-surface-1 p-3">
-						<div class="mb-2 flex items-center justify-between text-[12px]">
-							<span class="text-text">Samples</span>
-							<span class="text-faint">{samples.length} / {MAX_SAMPLES}</span>
-						</div>
-						<p class="mb-3 text-[11px] text-faint">Hold the sign and capture a few from slightly different angles. 3–20 recommended.</p>
-						<div class="flex gap-2">
-							<button onclick={() => runCapture(captureSample)} disabled={!present || samples.length >= MAX_SAMPLES} class="flex-1 rounded-md bg-accent/90 px-3 py-2 text-[12px] font-medium text-black transition-colors hover:bg-accent disabled:opacity-40">Capture sample</button>
-							<button onclick={undoSample} disabled={samples.length === 0} class="rounded-md border border-border bg-surface-2 px-3 py-2 text-[12px] text-muted transition-colors hover:text-text disabled:opacity-40">Undo</button>
-						</div>
+					<p class="mb-3 text-[11px] text-faint">Hold the sign and capture a few from slightly different angles. 3–20 recommended.</p>
+					<div class="flex gap-2">
+						<button onclick={() => runCapture(captureSample)} disabled={!present || samples.length >= MAX_SAMPLES} class="flex-1 rounded-md bg-accent/90 px-3 py-2 text-[12px] font-medium text-black transition-colors hover:bg-accent disabled:opacity-40">Capture sample</button>
+						<button onclick={undoSample} disabled={samples.length === 0} class="rounded-md border border-border bg-surface-2 px-3 py-2 text-[12px] text-muted transition-colors hover:text-text disabled:opacity-40">Undo</button>
 					</div>
-				{/if}
+				</div>
 			{/if}
 
 			<div class="mt-auto flex justify-end gap-2">

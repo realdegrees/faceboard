@@ -32,16 +32,10 @@ export interface Trigger {
 	meshLandmarks?: number[];
 	/** Hand triggers: number of hands the trigger uses (default 1). */
 	hands?: 1 | 2;
-	/** Hand triggers: held pose vs moving gesture (default 'static'). */
-	motion?: 'static' | 'dynamic';
 	/** Hand poses: match the pose regardless of hand orientation (upside down etc.). */
 	rotationInvariant?: boolean;
 	/** Hand triggers: also match the other hand (1-hand) / swapped hands (2-hand). */
 	eitherHand?: boolean;
-	/** Dynamic gestures: few-shot motion templates (normalized + resampled). */
-	sequences?: number[][][];
-	/** Dynamic gestures: typical recorded duration (ms), sizes the live window. */
-	durationMs?: number;
 	/** Match score threshold in [0,1] — higher is stricter. */
 	threshold: number;
 	/** Match must be sustained this long (ms) before the sound fires. */
@@ -123,6 +117,14 @@ export function defaultSettings(): FaceboardSettings {
 	};
 }
 
+/** A legacy dynamic (moving) hand gesture from before that feature was removed.
+ *  Such triggers stored motion templates instead of a static pose, so they can no
+ *  longer match — drop them on load rather than render a broken card. */
+function isLegacyDynamic(t: unknown): boolean {
+	const r = t as { motion?: unknown; sequences?: unknown } | null;
+	return !!r && (r.motion === 'dynamic' || Array.isArray(r.sequences));
+}
+
 /** Coerce an unknown persisted document into a valid settings object. */
 export function migrateSettings(raw: unknown): FaceboardSettings {
 	const base = defaultSettings();
@@ -130,7 +132,7 @@ export function migrateSettings(raw: unknown): FaceboardSettings {
 	const r = raw as Partial<FaceboardSettings>;
 	return {
 		version: SETTINGS_VERSION,
-		triggers: Array.isArray(r.triggers) ? r.triggers : base.triggers,
+		triggers: Array.isArray(r.triggers) ? r.triggers.filter((t) => !isLegacyDynamic(t)) : base.triggers,
 		sounds: Array.isArray(r.sounds) ? r.sounds : base.sounds,
 		shortcuts: { ...base.shortcuts, ...(r.shortcuts ?? {}) },
 		general: { ...base.general, ...(r.general ?? {}) }

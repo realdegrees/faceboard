@@ -21,7 +21,6 @@
 			const pose = preset && preset.kind === 'hand-gesture' ? PRESET_HAND_POSES[preset.gesture] : null;
 			return pose ? [pose] : null;
 		}
-		if (trigger.motion === 'dynamic') return trigger.sequences?.length ? trigger.sequences[0] : null;
 		return trigger.samples?.length ? [trigger.samples[0]] : null;
 	});
 
@@ -66,12 +65,6 @@
 		app.updateTrigger(trigger.id, { eitherHand: (e.target as HTMLSelectElement).value === 'either' });
 	}
 
-	const isDynamic = $derived(
-		trigger.modality === 'hand' && trigger.kind === 'custom' && trigger.motion === 'dynamic'
-	);
-	const isHandPose = $derived(
-		trigger.modality === 'hand' && trigger.kind === 'custom' && trigger.motion !== 'dynamic'
-	);
 	const isHandCustom = $derived(trigger.modality === 'hand' && trigger.kind === 'custom');
 	const isFaceCustom = $derived(trigger.modality === 'face' && trigger.kind === 'custom');
 	const canHeadPose = $derived(isFaceCustom && !!trigger.headPose);
@@ -103,7 +96,7 @@
 				</span>
 				{#if trigger.modality === 'hand' && trigger.kind === 'custom'}
 					<span class="shrink-0 text-[10px] text-faint">
-						{trigger.hands === 2 ? '2-hand' : '1-hand'} · {trigger.motion === 'dynamic' ? 'gesture' : 'pose'}
+						{trigger.hands === 2 ? '2-hand' : '1-hand'} · pose
 					</span>
 				{/if}
 			</div>
@@ -187,19 +180,17 @@
 			/>
 		</label>
 
-		{#if !isDynamic}
-			<label class="flex flex-col gap-1">
-				<span class="text-[11px] text-faint">Hold (ms)</span>
-				<input
-					type="number"
-					min="0"
-					step="50"
-					value={trigger.holdMs}
-					oninput={setHold}
-					class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] outline-none focus:border-border-strong"
-				/>
-			</label>
-		{/if}
+		<label class="flex flex-col gap-1">
+			<span class="text-[11px] text-faint">Hold (ms)</span>
+			<input
+				type="number"
+				min="0"
+				step="50"
+				value={trigger.holdMs}
+				oninput={setHold}
+				class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] outline-none focus:border-border-strong"
+			/>
+		</label>
 
 		<label class="flex flex-col gap-1">
 			<span class="text-[11px] text-faint">Cooldown (ms)</span>
@@ -213,21 +204,19 @@
 			/>
 		</label>
 
-		{#if !isDynamic}
-			<label class="flex flex-col gap-1">
-				<span class="text-[11px] text-faint">Replay</span>
-				<select
-					value={trigger.retrigger ?? 'once'}
-					onchange={setRetrigger}
-					class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] text-muted outline-none focus:border-border-strong"
-				>
-					<option value="once">Once</option>
-					<option value="while-held">While held</option>
-				</select>
-			</label>
-		{/if}
+		<label class="flex flex-col gap-1">
+			<span class="text-[11px] text-faint">Replay</span>
+			<select
+				value={trigger.retrigger ?? 'once'}
+				onchange={setRetrigger}
+				class="rounded-md border border-border bg-surface-2 px-2 py-1.5 text-[12px] text-muted outline-none focus:border-border-strong"
+			>
+				<option value="once">Once</option>
+				<option value="while-held">While held</option>
+			</select>
+		</label>
 
-		{#if isHandPose}
+		{#if isHandCustom}
 			<label class="flex flex-col gap-1">
 				<span class="text-[11px] text-faint">Rotation</span>
 				<select

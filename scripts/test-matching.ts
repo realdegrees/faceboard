@@ -7,13 +7,7 @@ import {
 	normalizeHand,
 	cosine,
 	orderHands,
-	normalizeStaticPose,
-	handsFrameVector,
-	normalizeSequence,
-	resampleSequence,
-	dtw,
-	toTemplate,
-	DYN_LEN
+	normalizeStaticPose
 } from '../src/lib/triggers/features';
 import type { DetectionFrame, FaceData, HandData, HandPoint, HeadPose } from '../src/lib/detection/types';
 import type { Trigger } from '../src/lib/types';
@@ -67,14 +61,14 @@ assert(cosine(normalizeHand(h1), normalizeHand(h1moved)) > 0.999, 'hand normaliz
 
 // --- rotation-invariant hand pose ---
 const poseBase = handWith('Right', [0, 0, 1]);
-const rotTrig = mkTrigger({ modality: 'hand', kind: 'custom', motion: 'static', hands: 1, rotationInvariant: true, samples: [normalizeStaticPose([poseBase])], threshold: 0.85 });
+const rotTrig = mkTrigger({ modality: 'hand', kind: 'custom', hands: 1, rotationInvariant: true, samples: [normalizeStaticPose([poseBase])], threshold: 0.85 });
 const rotated: HandData = { ...poseBase, landmarks: poseBase.landmarks.map((p) => ({ ...p, x: -p.x, y: -p.y })) };
 assert(scoreTrigger(rotTrig, { tsMs: 0, face: null, hands: [rotated] }) > 0.95, 'rotation-invariant pose matches a 180°-rotated hand');
-const fixedTrig = mkTrigger({ modality: 'hand', kind: 'custom', motion: 'static', hands: 1, samples: [normalizeStaticPose([poseBase])], threshold: 0.85 });
+const fixedTrig = mkTrigger({ modality: 'hand', kind: 'custom', hands: 1, samples: [normalizeStaticPose([poseBase])], threshold: 0.85 });
 assert(scoreTrigger(fixedTrig, { tsMs: 0, face: null, hands: [rotated] }) < scoreTrigger(rotTrig, { tsMs: 0, face: null, hands: [rotated] }), 'a fixed pose is more orientation-sensitive than a rotation-invariant one');
 
 // --- custom hand (static, 1 hand) ---
-const customHand = mkTrigger({ modality: 'hand', kind: 'custom', motion: 'static', hands: 1, samples: [normalizeStaticPose([h1])], threshold: 0.9 });
+const customHand = mkTrigger({ modality: 'hand', kind: 'custom', hands: 1, samples: [normalizeStaticPose([h1])], threshold: 0.9 });
 assert(scoreTrigger(customHand, { tsMs: 0, face: null, hands: [h1moved] }) > 0.99, 'custom 1-hand pose matches the same pose moved/scaled');
 
 // --- pose discrimination: a "point" must NOT match an open palm (real bug) ---
@@ -96,7 +90,7 @@ const POINT = handFrom([
 	[0.56, 0.71, 0], [0.57, 0.6, 0], [0.57, 0.66, 0], [0.56, 0.71, 0],
 	[0.61, 0.74, 0], [0.62, 0.63, 0], [0.62, 0.69, 0], [0.61, 0.73, 0]
 ]);
-const pointTrig = mkTrigger({ modality: 'hand', kind: 'custom', motion: 'static', hands: 1, samples: [normalizeStaticPose([POINT])], threshold: 0.9 });
+const pointTrig = mkTrigger({ modality: 'hand', kind: 'custom', hands: 1, samples: [normalizeStaticPose([POINT])], threshold: 0.9 });
 const pointSelf = scoreTrigger(pointTrig, { tsMs: 0, face: null, hands: [POINT] });
 const pointVsPalm = scoreTrigger(pointTrig, { tsMs: 0, face: null, hands: [PALM] });
 console.log('  [pose] point-vs-point=' + pointSelf.toFixed(3) + ' point-vs-palm=' + pointVsPalm.toFixed(3));
@@ -113,29 +107,11 @@ assert(orderHands([R, L], 2)?.[0].handedness === 'Left', 'orderHands puts Left f
 assert(orderHands([L], 2) === null, 'orderHands needs 2 hands for count 2');
 
 // --- static 2-hand pose (both hands transformed together) ---
-const twoHand = mkTrigger({ modality: 'hand', kind: 'custom', motion: 'static', hands: 2, samples: [normalizeStaticPose([L, R])], threshold: 0.9 });
+const twoHand = mkTrigger({ modality: 'hand', kind: 'custom', hands: 2, samples: [normalizeStaticPose([L, R])], threshold: 0.9 });
 const Lm = handWith('Left', [0.4, 0.3, 2]); // L under translate (0.2,0.3) + scale 2
 const Rm = handWith('Right', [1.4, 0.3, 2]); // R under the same transform
 assert(scoreTrigger(twoHand, { tsMs: 0, face: null, hands: [Rm, Lm] }) > 0.95, 'custom 2-hand pose matches when both hands move together');
 assert(scoreTrigger(twoHand, { tsMs: 0, face: null, hands: [Lm] }) === 0, '2-hand pose scores 0 with one hand');
-
-// --- resample + DTW (dynamic gestures) ---
-assert(resampleSequence([[0], [1], [2], [3]], 8).length === 8, 'resampleSequence hits target length');
-function moveSeq(fromX: number, toX: number, frames: number): number[][] {
-	const out: number[][] = [];
-	for (let i = 0; i < frames; i++) {
-		const x = fromX + (toX - fromX) * (i / (frames - 1));
-		out.push(handsFrameVector([handWith('Right', [x, 0, 1])]));
-	}
-	return out;
-}
-const tmpl = toTemplate(moveSeq(0.2, 0.8, 30));
-assert(tmpl.length === DYN_LEN, 'template resampled to DYN_LEN');
-assert(dtw(tmpl, tmpl) < 1e-6, 'dtw of identical sequences is ~0');
-const dSame = dtw(tmpl, toTemplate(moveSeq(0.35, 0.95, 18))); // same path, shifted + different speed
-const dRev = dtw(tmpl, toTemplate(moveSeq(0.8, 0.2, 24))); // reversed motion
-assert(dSame < dRev, 'dtw: same motion closer than reversed motion');
-assert(dSame < 0.15, 'dtw: position-shifted + speed-varied motion is a strong match');
 
 // --- neutral-relative expression matching ---
 // Resting face already has a slight smile; the captured expression is a big smile.
