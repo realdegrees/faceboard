@@ -1,6 +1,6 @@
 {
   "name": "faceboard",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "description": "Facial-expression and hand-sign triggered local soundboard",
   "private": true,
   "type": "module",
